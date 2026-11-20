@@ -1,0 +1,53 @@
+name: contracts
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+
+      - name: Install script dependencies
+        run: npm ci
+
+      - name: Format
+        run: forge fmt --check
+
+      - name: Lint
+        run: forge lint --deny warnings
+
+      - name: Build (with contract sizes)
+        run: forge build --sizes
+
+      - name: Unit, fuzz and invariant tests
+        run: FOUNDRY_PROFILE=ci forge test -vv
+
+      - name: Differential tests against QoreSign (FFI)
+        run: FOUNDRY_PROFILE=ffi forge test -vv
+
+      - name: Gas snapshot is up to date
+        run: forge snapshot --check --no-match-path 'test/invariant/*'
+
+      - name: Typecheck scripts
+        run: npx tsc --noEmit

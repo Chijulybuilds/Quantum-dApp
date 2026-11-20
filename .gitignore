@@ -1,0 +1,19 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# Node
+node_modules/
+contracts/coverage/
+lcov.info
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
