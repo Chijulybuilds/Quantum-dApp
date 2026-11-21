@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/jetbrains-mono";
+
+@theme {
+  --font-sans: "Outfit Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --color-ink: #080808;
+  --color-ink-2: #0e0e10;
+  --color-panel: #131316;
+  --color-panel-2: #1a1a1e;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-2: rgb(255 255 255 / 0.14);
+  --color-fog: #a3a3a3;
+  --color-mute: #737373;
+  --color-paper: #f4f4f2;
+  --color-violet: #7b5cff;
+  --color-violet-2: #a28bff;
+  --color-mint: #34f5c5;
+  --color-ember: #ff5a36;
+  --color-sun: #ffd34d;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-quart: cubic-bezier(0.76, 0, 0.24, 1);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  background: var(--color-ink);
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-weight: 450;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--color-violet);
+  color: #fff;
+}
+
+@layer components {
+/* Hairline card used across the app */
+.card {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.01));
+  border: 1px solid var(--color-line);
+  border-radius: 28px;
+}
+
+.card-hover {
+  transition: background-color 0.7s ease, border-color 0.5s ease, transform 0.6s var(--ease-out-expo);
+}
+.card-hover:hover {
+  background-color: rgb(255 255 255 / 0.03);
+  border-color: var(--color-line-2);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-line);
+  background: rgb(255 255 255 / 0.04);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  color: #e5e5e5;
+  backdrop-filter: blur(10px);
+}
+
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border-radius: 999px;
+  padding: 0.85rem 1.35rem;
+  font-weight: 550;
+  font-size: 0.95rem;
+  line-height: 1;
+  transition: transform 0.5s var(--ease-out-expo), background-color 0.4s ease, color 0.3s ease, box-shadow 0.4s ease;
+  will-change: transform;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn-primary {
+  background: #fff;
+  color: var(--color-ink);
+}
+.btn-primary:hover {
+  box-shadow: 0 0 0 6px rgb(255 255 255 / 0.08);
+}
+.btn-violet {
+  background: var(--color-violet);
+  color: #fff;
+}
+.btn-violet:hover {
+  box-shadow: 0 0 0 6px rgb(123 92 255 / 0.25);
+}
+.btn-ghost {
+  background: rgb(255 255 255 / 0.06);
+  color: #fff;
+  border: 1px solid var(--color-line);
+}
+.btn-ghost:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+.btn[disabled] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Spotlight from the top, as in the hero */
+.spotlight {
+  background:
+    radial-gradient(60% 55% at 50% 0%, rgb(123 92 255 / 0.22), transparent 70%),
+    radial-gradient(40% 35% at 50% 0%, rgb(255 255 255 / 0.10), transparent 70%);
+}
+
+.grid-lines {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(70% 60% at 50% 40%, #000 30%, transparent 80%);
+}
+
+.text-gradient {
+  background: linear-gradient(90deg, #fff 0%, #cfc4ff 45%, var(--color-mint) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hash {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+/* Split-text characters start transparent until GSAP reveals them */
+.split-char {
+  display: inline-block;
+  will-change: opacity, transform;
+}
+}
+
+@keyframes float-y {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -10px, 0); }
+}
+@layer components {
+  .float {
+    animation: float-y 6s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 0.9; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@layer components {
+.pulse-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: currentColor;
+  animation: pulse-ring 1.8s var(--ease-out-expo) infinite;
+}
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

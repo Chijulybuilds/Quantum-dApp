@@ -11,9 +11,11 @@ contracts/broadcast/
 # Node
 node_modules/
 contracts/coverage/
+app/dist/
 lcov.info
 
 # OS / editors
 .DS_Store
 .idea/
 .vscode/
+*.tsbuildinfo

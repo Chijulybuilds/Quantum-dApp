@@ -16,6 +16,7 @@
     "deploy:testnet": "tsx --env-file=.env scripts/deploy.ts",
     "conclave": "tsx --env-file=.env scripts/conclave.ts",
     "pqc:check": "tsx --env-file=.env scripts/pqc-check.ts",
+    "export-abi": "tsx scripts/export-abi.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -5,7 +5,7 @@
 Built for the **Post-Quantum dApp** bounty of *Build Before Q-Day: the QoreChain Developer Fest*.
 
 [![Built on QoreChain](https://build.qorechain.io/badge/conclave.svg)](https://build.qorechain.io/p/conclave)
-[![contracts](https://github.com/Chijulybuilds/Quantum-dApp/actions/workflows/contracts.yml/badge.svg)](https://github.com/Chijulybuilds/Quantum-dApp/actions/workflows/contracts.yml)
+[![ci](https://github.com/Chijulybuilds/Quantum-dApp/actions/workflows/ci.yml/badge.svg)](https://github.com/Chijulybuilds/Quantum-dApp/actions/workflows/ci.yml)
 
 ---
 
@@ -49,6 +49,31 @@ leaked relayer key can only submit signatures members already made, and only to 
 
 **The worst a stolen classical key can do is one temporary pause.** It can never vote, approve,
 withdraw or unpause, and a queued payout survives the pause because the grace period is longer.
+
+## The full stack
+
+```mermaid
+flowchart LR
+    U[Member in QoreX] -- "signArbitrary · ML-DSA-87" --> A
+    A["app/ · React + wagmi + RainbowKit<br/>QoreX wallet, Q-Passport, voting UI"] -- "reads (wagmi)" --> C
+    A -- "signed vote / proposal (HTTP)" --> R
+    R["server/ · relayer + indexer<br/>verifies ML-DSA-87 off-chain, simulates"] -- "tx from EVM window scoped to Conclave" --> C
+    R -. "keeps window open (hybrid native tx)" .-> N[(QoreChain native lane)]
+    C["contracts/ · Conclave.sol"] -- "pqcKeyStatus · pqcVerify" --> P[(PQC precompiles)]
+```
+
+| Layer | What it does |
+|---|---|
+| [`contracts/`](contracts) | `Conclave.sol`: PQ-signed propose/vote/cancel, timelocked execution, guardian fuse |
+| [`server/`](server) | Relayer and indexer (Hono): checks every ML-DSA-87 signature against the signer's on-chain key **before** spending gas, simulates, submits from an EVM window scoped to Conclave, re-opens that window when it runs low, indexes proposals, votes and activity |
+| [`app/`](app) | Web app (Vite, React, wagmi, RainbowKit with the QoreX wallet, GSAP, Motion): landing page, hold-to-connect "airlock", Q-Passport, treasury dashboard, proposals, voting, execution |
+
+**Why a relayer:** QoreX connects to dApps over EIP-6963, but it cannot send EVM transactions or
+`personal_sign` yet. Conclave doesn't need either: members sign a readable message with
+`window.qorex.native.signArbitrary` (ML-DSA-87), and the relayer submits it. Members need no gas
+and no EVM window. The relayer adds no trust: the contract re-checks every signature, and the
+relayer's own window can only reach Conclave. Wallets that can send EVM transactions (MetaMask with
+an open window) can also execute directly through wagmi.
 
 ## Bounty requirements
 
@@ -95,7 +120,9 @@ of creation code ([`script/LivePqcProbe.sol`](contracts/script/LivePqcProbe.sol)
 | `invariant/` | 256 runs × 64 random honest and attacker calls: treasury accounting, attacker never paid, no forged success, majority always valid |
 | `test-ffi/` | The bytes the contract verifies are exactly what **QoreSign** (the library QoreX uses) signs; a real ML-DSA-87 signature verifies over them |
 
-Coverage: 100% of functions, about 95% of lines and branches.
+Coverage: 100% of functions, about 95% of lines and branches. The relayer has its own tests
+(`server/test/`): real ML-DSA-87 signatures accepted and rejected the same way the contract does,
+and request validation.
 
 ```bash
 cd contracts
@@ -111,22 +138,27 @@ Gas (contract cost measured with Foundry, plus the live `pqcVerify` cost measure
 | `castVote` | ≈ 146k contract + ≈ 74k signature calldata + ≈ 185k `pqcVerify` precompile ≈ **400k** |
 | `execute` (native payout) | ≈ 78k |
 
-## Run it on the testnet
+## Run it
 
 ```bash
-cd contracts && npm ci && forge build && cp .env.example .env   # then fill in .env
-npm run window register         # once per account: register its ML-DSA-87 key
-npm run window open             # unscoped window, only for the deployment
-npm run deploy:testnet          # pre-flight checks every member's key, then deploys
-npm run window open-scoped      # relayer window that can ONLY call Conclave
-npm run conclave propose-payout <to> 1 "First grant"
-npm run conclave vote 1 for     # each member, with their own MEMBER_MNEMONIC
-npm run conclave execute 1      # anyone, after the timelock
+# 1. Contracts
+cd contracts && npm ci && forge build && forge test
+
+# 2. Relayer: create server/.env with CONCLAVE_MNEMONIC (see server/.env.example), fund the
+#    relayer from the faucet, then bootstrap the testnet demo DAO (keys, funding, deploy, window)
+cd ../server && npm ci && npm run setup:testnet && npm run dev      # http://localhost:8787
+
+# 3. App
+cd ../app && npm ci && npm run dev                                   # http://localhost:5173
 ```
 
+The app is published to GitHub Pages by [`pages.yml`](.github/workflows/pages.yml)
+(set the repository variable `CONCLAVE_API_URL` to the public relayer URL). QoreX mobile needs a
+public HTTPS address, so test the mobile wallet on the published app.
+
 `forge script` cannot deploy Conclave: Foundry's local EVM has no QoreChain precompiles, so the
-constructor's key checks would fail in simulation. `deploy.ts` sends the deployment straight to
-the chain instead.
+constructor's key checks would fail in simulation. `server/src/setup.ts` and
+`contracts/scripts/deploy.ts` send the deployment straight to the chain instead.
 
 ## Repository
 
@@ -137,6 +169,8 @@ contracts/src/libraries/ConclaveMessages.sol  the messages members sign
 contracts/test/                            Foundry unit, fuzz and invariant tests
 contracts/test-ffi/                        differential tests against QoreSign
 contracts/scripts/                         window, deploy, member CLI, live precompile check
+server/src/                                relayer, indexer, window keeper, testnet bootstrap
+app/src/                                   web app: landing, airlock connect, Q-Passport, dashboard
 docs/ARCHITECTURE.md                       design, message format, decisions
 docs/THREAT_MODEL.md                       Q-Day threat model and mitigations
 docs/AUDIT.md                              two-stage QCAI audit workbook and PQC design notes
@@ -147,7 +181,9 @@ AI_USAGE.md                                how AI was used
 ## Credits
 
 - [create-qorechain-dapp](https://www.npmjs.com/package/create-qorechain-dapp) Foundry template (Apache-2.0): `foundry.toml` base and the EVM window helper `scripts/window.ts` is adapted from it
-- QoreChain kits: `@qorechain/sdk`, `@qorechain/evm`, `@qorechain/qoresign` (Apache-2.0)
+- QoreChain kits: `@qorechain/sdk`, `@qorechain/evm`, `@qorechain/qoresign`, `@qorechain/qorex-rainbowkit`, `@qorechain/qorex-types` (Apache-2.0)
+- [RainbowKit](https://rainbowkit.com), [wagmi](https://wagmi.sh), [Hono](https://hono.dev), [GSAP](https://gsap.com), [Motion](https://motion.dev), [Tailwind CSS](https://tailwindcss.com), Outfit and JetBrains Mono fonts (OFL)
+- Motion language inspired by studio sites such as Outcrowd's (scroll-scrubbed text, perspective product shots); all design and content are original
 - [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) v5.7.0 (MIT): `ReentrancyGuard`, `SafeERC20`, `Strings`, `ShortStrings`
 - [forge-std](https://github.com/foundry-rs/forge-std) v1.17.0 (MIT/Apache-2.0), [viem](https://viem.sh) (MIT)
 
