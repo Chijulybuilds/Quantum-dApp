@@ -3,6 +3,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 
 import { Nav } from "./components/Nav";
 import { Preloader } from "./components/Preloader";
+import { SmoothScroll } from "./components/SmoothScroll";
 import { ScrollTrigger } from "./lib/motion";
 import { AppPage } from "./pages/AppPage";
 import { Landing } from "./pages/Landing";
@@ -22,6 +23,7 @@ export function App() {
   return (
     <>
       <Preloader />
+      <SmoothScroll />
       <ScrollReset />
       <Nav />
       <Routes>

@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { decodeFunctionData, formatEther, getAddress, isAddress, keccak256, parseEther, toBytes, type Address } from "viem";
 import { useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
-import { stateClass } from "../components/HeroDevice";
 import { PassportCard } from "../components/PassportCard";
 import { SealConnect } from "../components/SealConnect";
 import { SignAction } from "../components/SignAction";
@@ -12,6 +11,7 @@ import { conclaveAbi } from "../lib/abi";
 import { api, type Proposal } from "../lib/api";
 import { addressUrl, appConfig, txUrl } from "../lib/config";
 import { duration, nowSeconds, qor, short } from "../lib/format";
+import { stateClass } from "../lib/ui";
 
 export function AppPage() {
   const passport = usePassport();
@@ -285,6 +285,7 @@ function Drawer({ children, onClose, title }: { children: React.ReactNode; onClo
         exit={{ x: "100%" }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-ink-2 p-6 md:p-8"
+        data-lenis-prevent
         role="dialog"
         aria-label={title}
       >

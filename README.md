@@ -66,7 +66,7 @@ flowchart LR
 |---|---|
 | [`contracts/`](contracts) | `Conclave.sol`: PQ-signed propose/vote/cancel, timelocked execution, guardian fuse |
 | [`server/`](server) | Relayer and indexer (Hono): checks every ML-DSA-87 signature against the signer's on-chain key **before** spending gas, simulates, submits from an EVM window scoped to Conclave, re-opens that window when it runs low, indexes proposals, votes and activity |
-| [`app/`](app) | Web app (Vite, React, wagmi, RainbowKit with the QoreX wallet, GSAP, Motion): landing page, hold-to-connect "airlock", Q-Passport, treasury dashboard, proposals, voting, execution |
+| [`app/`](app) | Web app (Vite, React, wagmi, RainbowKit with the QoreX wallet, React Three Fiber, GSAP, Motion): a 3D dilution refrigerator that turns as you scroll down its five temperature stages while a **real ML-DSA-87 signature is computed in the browser** and revealed part by part (c̃ ‖ z ‖ h = 4,627 B); hold-to-connect "airlock"; Q-Passport; treasury dashboard, proposals, voting, execution |
 
 **Why a relayer:** QoreX connects to dApps over EIP-6963, but it cannot send EVM transactions or
 `personal_sign` yet. Conclave doesn't need either: members sign a readable message with
@@ -182,7 +182,8 @@ AI_USAGE.md                                how AI was used
 
 - [create-qorechain-dapp](https://www.npmjs.com/package/create-qorechain-dapp) Foundry template (Apache-2.0): `foundry.toml` base and the EVM window helper `scripts/window.ts` is adapted from it
 - QoreChain kits: `@qorechain/sdk`, `@qorechain/evm`, `@qorechain/qoresign`, `@qorechain/qorex-rainbowkit`, `@qorechain/qorex-types` (Apache-2.0)
-- [RainbowKit](https://rainbowkit.com), [wagmi](https://wagmi.sh), [Hono](https://hono.dev), [GSAP](https://gsap.com), [Motion](https://motion.dev), [Tailwind CSS](https://tailwindcss.com), Outfit and JetBrains Mono fonts (OFL)
+- [RainbowKit](https://rainbowkit.com), [wagmi](https://wagmi.sh), [Hono](https://hono.dev), [three.js](https://threejs.org), [React Three Fiber, drei and postprocessing](https://pmnd.rs), [GSAP](https://gsap.com), [Motion](https://motion.dev), [Lenis](https://lenis.darkroom.engineering), [Tailwind CSS](https://tailwindcss.com), [@noble/hashes](https://paulmillr.com/noble/), Outfit and JetBrains Mono fonts (OFL)
+- The 3D quantum computer is modelled from primitives in code (no photos or third-party 3D assets)
 - Motion language inspired by studio sites such as Outcrowd's (scroll-scrubbed text, perspective product shots); all design and content are original
 - [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) v5.7.0 (MIT): `ReentrancyGuard`, `SafeERC20`, `Strings`, `ShortStrings`
 - [forge-std](https://github.com/foundry-rs/forge-std) v1.17.0 (MIT/Apache-2.0), [viem](https://viem.sh) (MIT)

@@ -176,6 +176,7 @@ function Airlock({ step, setStep }: { step: Step; setStep: (s: Step) => void }) 
       {step !== "closed" && (
         <motion.div
           className="fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-ink/80 px-4 py-10 backdrop-blur-xl"
+          data-lenis-prevent
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
