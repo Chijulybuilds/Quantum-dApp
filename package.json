@@ -5,7 +5,7 @@
   "description": "Conclave: a DAO treasury on QoreChain that only moves on post-quantum (ML-DSA-87) votes.",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=20.19"
   },
   "scripts": {
     "install:all": "npm install && npm --prefix server ci && npm --prefix app ci && npm --prefix contracts ci",

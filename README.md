@@ -140,7 +140,7 @@ Gas (contract cost measured with Foundry, plus the live `pqcVerify` cost measure
 
 ## Run it
 
-Needs Node.js 22 or newer (`node -v`). Foundry is only needed to build and test the contracts.
+Needs Node.js 20.19 or newer (`node -v`). Foundry is only needed to build and test the contracts.
 
 ```bash
 npm run install:all     # installs root, server, app and contract-script dependencies
