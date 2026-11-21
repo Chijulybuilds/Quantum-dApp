@@ -30,7 +30,13 @@ const Env = z.object({
   QORE_EVM_RPC_URL: z.string().url().optional(),
 });
 
-const env = Env.parse(process.env);
+const parsed = Env.safeParse(process.env);
+if (!parsed.success) {
+  for (const issue of parsed.error.issues) console.error(`server/.env: ${issue.path.join(".")}: ${issue.message}`);
+  console.error("Create it with: npm run keys");
+  process.exit(1);
+}
+const env = parsed.data;
 const preset = getNetwork("testnet");
 
 interface DeploymentFile {
