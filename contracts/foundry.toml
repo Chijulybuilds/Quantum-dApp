@@ -1,0 +1,65 @@
+# Conclave - Foundry configuration.
+# Based on the create-qorechain-dapp `foundry` template (Apache-2.0).
+
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+solc_version = "0.8.28"
+# QoreChain (v3.2.3+) already handles EIP-7702 (Prague) transactions, so Cancun opcodes
+# such as MCOPY, which OpenZeppelin 5.7 uses, are available. Same default as solc 0.8.28.
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 1000
+# The IR pipeline handles propose()'s wide calldata signature (no stack-too-deep) and optimizes better.
+via_ir = true
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
+# FFI is off: the differential tests that call Node.js live in test-ffi/ (profile `ffi`).
+ffi = false
+
+[profile.default.fuzz]
+runs = 1000
+seed = "0xc0c1a7e"
+
+[profile.default.invariant]
+runs = 256
+depth = 64
+# The handler never reverts on purpose, so any revert in an honest action is a finding.
+fail_on_revert = true
+
+# Heavier settings for CI.
+[profile.ci.fuzz]
+runs = 5000
+
+[profile.ci.invariant]
+runs = 512
+depth = 128
+
+# Differential tests against the QoreSign npm package (needs `npm ci` first).
+[profile.ffi]
+ffi = true
+test = "test-ffi"
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+quote_style = "double"
+number_underscore = "thousands"
+
+# Public QoreChain EVM endpoints. Use them by name:
+#   forge ... --rpc-url qorechain_testnet
+[rpc_endpoints]
+qorechain = "https://evm.qore.host"
+qorechain_testnet = "https://evm-testnet.qore.host"
+
+[lint]
+# Timestamps drive the voting period, timelock and pause on purpose. A validator can only nudge
+# block time by seconds, which cannot matter against windows of minutes to days.
+exclude_lints = ["block-timestamp"]
