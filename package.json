@@ -9,12 +9,19 @@
   },
   "scripts": {
     "install:all": "npm install && npm --prefix server ci && npm --prefix app ci && npm --prefix contracts ci",
+    "prekeys": "node scripts/check-install.mjs",
     "keys": "npm --prefix server run keys",
+    "presetup:testnet": "node scripts/check-install.mjs",
     "setup:testnet": "npm --prefix server run setup:testnet",
+    "predev": "node scripts/check-install.mjs",
     "dev": "concurrently --kill-others-on-fail -n relayer,app -c magenta,cyan \"npm --prefix server run dev\" \"npm --prefix app run dev\"",
+    "predev:app": "node scripts/check-install.mjs",
     "dev:app": "npm --prefix app run dev",
+    "predev:server": "node scripts/check-install.mjs",
     "dev:server": "npm --prefix server run dev",
+    "prebuild": "node scripts/check-install.mjs",
     "build": "npm --prefix app run build",
+    "pretest": "node scripts/check-install.mjs",
     "test": "npm --prefix server test && cd contracts && forge test"
   },
   "devDependencies": {
