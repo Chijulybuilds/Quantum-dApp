@@ -9,7 +9,7 @@
  *
  * Only the relayer needs test QOR from the faucet first.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,7 +22,10 @@ import {
   signProofOfPossession,
   type UnifiedAccount,
 } from "@qorechain/sdk";
-import { parseEther, type Abi, type Address, type Hex } from "viem";
+import { parseEther, type Address } from "viem";
+
+import { conclaveAbi } from "./abi.js";
+import { conclaveBytecode } from "./bytecode.js";
 
 import { account, balanceUqor, broadcastNative, keyStatus, publicClient, txUrl, walletFor } from "./chain.js";
 import { config, deployment } from "./config.js";
@@ -69,13 +72,6 @@ async function fund(from: UnifiedAccount, label: string, to: UnifiedAccount, min
   console.log(`  ${label}: sent ${fmt(amount)}  ${txUrl(hash)}`);
 }
 
-function artifact(): { abi: Abi; bytecode: Hex } {
-  const json = JSON.parse(readFileSync(resolve(here, "../../contracts/out/Conclave.sol/Conclave.json"), "utf8")) as {
-    abi: Abi;
-    bytecode: { object: Hex };
-  };
-  return { abi: json.abi, bytecode: json.bytecode.object };
-}
 
 async function deploy(relayer: UnifiedAccount, demoA: UnifiedAccount, demoB: UnifiedAccount, guardian: UnifiedAccount) {
   const existing = deployment();
@@ -100,11 +96,10 @@ async function deploy(relayer: UnifiedAccount, demoA: UnifiedAccount, demoB: Uni
   await sleep(4000);
 
   const wallet = walletFor(relayer);
-  const { abi, bytecode } = artifact();
   const hash = await wallet.deployContract({
-    abi,
-    bytecode,
-    args: [members, 2, guardian.evm, TIMING, config.chainId],
+    abi: conclaveAbi,
+    bytecode: conclaveBytecode,
+    args: [members, 2, guardian.evm as Address, TIMING, config.chainId],
   });
   const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
   if (receipt.status !== "success" || !receipt.contractAddress) throw new Error(`Deployment failed: ${txUrl(hash)}`);

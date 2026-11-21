@@ -140,17 +140,17 @@ Gas (contract cost measured with Foundry, plus the live `pqcVerify` cost measure
 
 ## Run it
 
+Needs Node.js 22 or newer (`node -v`). Foundry is only needed to build and test the contracts.
+
 ```bash
-# 1. Contracts
-cd contracts && npm ci && forge build && forge test
-
-# 2. Relayer: create server/.env with CONCLAVE_MNEMONIC (see server/.env.example), fund the
-#    relayer from the faucet, then bootstrap the testnet demo DAO (keys, funding, deploy, window)
-cd ../server && npm ci && npm run setup:testnet && npm run dev      # http://localhost:8787
-
-# 3. App
-cd ../app && npm ci && npm run dev                                   # http://localhost:5173
+npm run install:all     # installs root, server, app and contract-script dependencies
+npm run keys            # creates server/.env (testnet recovery phrase) and prints the relayer address
+# claim at least 3 test QOR for the relayer at https://dashboard.qorechain.io/faucet
+npm run setup:testnet   # registers keys, funds demo accounts, deploys Conclave, opens the scoped window
+npm run dev             # relayer on http://localhost:8787 + app on http://localhost:5173
 ```
+
+Contracts on their own: `cd contracts && forge build && forge test`.
 
 The app is published to GitHub Pages by [`pages.yml`](.github/workflows/pages.yml)
 (set the repository variable `CONCLAVE_API_URL` to the public relayer URL). QoreX mobile needs a

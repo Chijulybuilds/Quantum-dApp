@@ -1,0 +1,23 @@
+{
+  "name": "conclave",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Conclave: a DAO treasury on QoreChain that only moves on post-quantum (ML-DSA-87) votes.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "install:all": "npm install && npm --prefix server ci && npm --prefix app ci && npm --prefix contracts ci",
+    "keys": "npm --prefix server run keys",
+    "setup:testnet": "npm --prefix server run setup:testnet",
+    "dev": "concurrently --kill-others-on-fail -n relayer,app -c magenta,cyan \"npm --prefix server run dev\" \"npm --prefix app run dev\"",
+    "dev:app": "npm --prefix app run dev",
+    "dev:server": "npm --prefix server run dev",
+    "build": "npm --prefix app run build",
+    "test": "npm --prefix server test && cd contracts && forge test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

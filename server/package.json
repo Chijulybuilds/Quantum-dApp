@@ -6,8 +6,12 @@
   "description": "Conclave relayer and indexer: relays ML-DSA-87 signed DAO actions from an EVM window scoped to the Conclave contract.",
   "license": "MIT",
   "scripts": {
+    "keys": "tsx src/keys.ts",
+    "predev": "node -e \"require('fs').existsSync('.env')||(console.error('No server/.env yet. Run: npm run keys'),process.exit(1))\"",
     "dev": "tsx watch --env-file=.env src/index.ts",
+    "prestart": "node -e \"require('fs').existsSync('.env')||(console.error('No server/.env yet. Run: npm run keys'),process.exit(1))\"",
     "start": "tsx --env-file=.env src/index.ts",
+    "presetup:testnet": "node -e \"require('fs').existsSync('.env')||(console.error('No server/.env yet. Run: npm run keys'),process.exit(1))\"",
     "setup:testnet": "tsx --env-file=.env src/setup.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -27,5 +31,8 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.3",
     "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
