@@ -80,7 +80,7 @@ function HoldToSeal({ onSealed, compact }: { onSealed: () => void; compact: bool
         }
       }}
       whileHover={{ scale: 1.03 }}
-      className={`group relative flex select-none items-center gap-3 rounded-full bg-white pr-5 pl-1.5 font-semibold text-ink ${compact ? "h-10 text-sm" : "h-12 text-[0.95rem]"}`}
+      className={`group relative flex select-none items-center gap-3 rounded-full bg-white pr-5 pl-1.5 font-semibold whitespace-nowrap text-ink ${compact ? "h-10 text-sm" : "h-12 text-[0.95rem]"}`}
       aria-label="Connect wallet: press and hold, or press Enter"
     >
       <motion.span
