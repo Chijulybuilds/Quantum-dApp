@@ -5,6 +5,7 @@ import type { Address, Hex } from "viem";
 import type { RelayResult } from "../lib/api";
 import { txUrl } from "../lib/config";
 import { canSignWithQorex, parseSignature, qorexInstalled, signWithQorex } from "../lib/qorex";
+import { SignatureForge } from "./live/SignatureForge";
 
 type Phase = "idle" | "signing" | "relaying" | "done" | "error";
 
@@ -32,15 +33,17 @@ export function SignAction({
   const [result, setResult] = useState<RelayResult>();
   const [manual, setManual] = useState(false);
   const [pasted, setPasted] = useState("");
+  const [signature, setSignature] = useState<Hex>();
   const qorexReady = canSignWithQorex();
 
   const run = async (getSignature: () => Promise<Hex>) => {
     setError(undefined);
     try {
       setPhase("signing");
-      const signature = await getSignature();
+      const sig = await getSignature();
+      setSignature(sig);
       setPhase("relaying");
-      const r = await submit(signature);
+      const r = await submit(sig);
       setResult(r);
       setPhase("done");
       onDone?.(r);
@@ -62,21 +65,28 @@ export function SignAction({
 
       <AnimatePresence mode="wait">
         {phase === "done" && result ? (
-          <motion.div key="done" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="rounded-2xl border border-mint/40 bg-mint/10 p-4">
-            <p className="font-medium text-mint">✓ Verified on chain by pqcVerify and recorded</p>
-            <a className="hash mt-1 block truncate text-xs text-white/70 underline-offset-4 hover:underline" href={txUrl(result.hash)} target="_blank" rel="noreferrer">
-              {result.hash}
-            </a>
+          <motion.div key="done" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="relative flex items-center gap-4 rounded-2xl border border-mint/40 bg-mint/10 p-4">
+            <SealedCheck />
+            <div className="min-w-0">
+              <p className="font-medium text-mint">Verified on chain by pqcVerify and recorded</p>
+              <a className="hash mt-1 block truncate text-xs text-white/70 underline-offset-4 hover:underline" href={txUrl(result.hash)} target="_blank" rel="noreferrer">
+                {result.hash}
+              </a>
+            </div>
+          </motion.div>
+        ) : phase === "signing" || phase === "relaying" ? (
+          <motion.div key="forge" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+            <SignatureForge phase={phase} signature={signature} />
           </motion.div>
         ) : (
-          <motion.div key="actions" className="space-y-3">
+          <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
             <button
               type="button"
-              disabled={!message || !signer || phase === "signing" || phase === "relaying" || !qorexReady}
+              disabled={!message || !signer || !qorexReady}
               onClick={() => run(() => signWithQorex(message!, signer!))}
               className="btn btn-violet w-full"
             >
-              {phase === "signing" ? "Waiting for QoreX…" : phase === "relaying" ? "Relaying · verifying on chain…" : `${label} · sign in QoreX`}
+              {`${label} · sign in QoreX`}
             </button>
             {!qorexReady && (
               <p className="text-xs text-fog">
@@ -97,7 +107,7 @@ export function SignAction({
                     rows={3}
                     className="hash w-full rounded-xl border border-white/10 bg-ink p-3 text-xs outline-none focus:border-violet"
                   />
-                  <button type="button" className="btn btn-ghost w-full" disabled={!pasted || phase === "relaying"} onClick={() => run(async () => parseSignature(pasted))}>
+                  <button type="button" className="btn btn-ghost w-full" disabled={!pasted} onClick={() => run(async () => parseSignature(pasted))}>
                     Relay pasted signature
                   </button>
                 </motion.div>
@@ -108,5 +118,28 @@ export function SignAction({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** A check that draws itself while a ring of mint particles bursts out of it. */
+export function SealedCheck() {
+  return (
+    <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-mint/15">
+      {Array.from({ length: 10 }, (_, i) => {
+        const a = (i / 10) * Math.PI * 2;
+        return (
+          <motion.span
+            key={i}
+            className="absolute h-1 w-1 rounded-full bg-mint"
+            initial={{ x: 0, y: 0, opacity: 1 }}
+            animate={{ x: Math.cos(a) * 30, y: Math.sin(a) * 30, opacity: 0 }}
+            transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
+          />
+        );
+      })}
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34f5c5" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <motion.path d="M5 12.5l4.5 4.5L19 7.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.5, delay: 0.1 }} />
+      </svg>
+    </span>
   );
 }

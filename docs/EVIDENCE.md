@@ -16,13 +16,22 @@ Explorer: <https://explore.qore.network>. Add every address used here to the pro
 | `QorePQC.keyOf` (Conclave's Solidity) decodes a registered 2,592-byte key, algorithm 1 | PASS |
 | Live gas: direct `pqcVerify` call | 322,380 (incl. 21,000 base and 7,716 bytes of calldata) |
 
+`npm run pqc:check -- <qor1 address>` on 2026-11-22, behind `ConclaveProxy`:
+
+| Check | Result |
+|---|---|
+| `ConclaveProxy` deploys with a `ProxyAdmin` owned by the proxy | PASS |
+| `pqcVerify` in a proxy `DELEGATECALL` frame: valid accepted, changed message rejected | PASS |
+| `pqcKeyStatus` in the proxy constructor's init `DELEGATECALL` and after | PASS |
+| `eth_call` gas on the public RPC | capped at about 5M, so the probe uses a small harness behind the real proxy |
+
 ## Deployment and life cycle
 
 | Step | Command | Tx hash / address |
 |---|---|---|
 | Register ML-DSA-87 key (each member, relayer) | `npm run window register` | |
 | Unscoped window for the deployment | `npm run window open` | |
-| Deploy Conclave | `npm run deploy:testnet` | |
+| Deploy Conclave (implementation + `ConclaveProxy`) | `npm run deploy:testnet` or `npm run redeploy:testnet` | |
 | Fund the treasury | send test QOR to the contract | |
 | Relayer window **scoped to Conclave** | `npm run window open-scoped` | |
 | Proposal #1 (PQ signed) | `npm run conclave propose-payout …` | |

@@ -35,4 +35,4 @@ for (const [i, role] of roles.entries()) {
   console.log(`${String(i).padEnd(2)}${role.padEnd(20)}${acc.cosmos}   ${acc.evm}`);
 }
 const relayer = await deriveUnifiedAccount(mnemonic, 0);
-console.log(`\nNext: claim test QOR (at least 3) from https://dashboard.qorechain.io/faucet to\n  ${relayer.cosmos}\nthen run: npm run setup:testnet`);
+console.log(`\nNext: claim test QOR (at least 2.5) from https://dashboard.qorechain.io/faucet, or send it from QoreX, to\n  ${relayer.cosmos}\nthen run: npm run setup:testnet`);

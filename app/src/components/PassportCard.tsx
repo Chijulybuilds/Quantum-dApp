@@ -63,6 +63,7 @@ export function PassportCard({ data, stamp = true }: { data: PassportData; stamp
         />
         <div className="grid-lines absolute inset-0 opacity-60" />
         <motion.div className="absolute inset-0 mix-blend-overlay" style={{ background: sheen }} />
+        <div className="sheen-sweep mix-blend-overlay" aria-hidden />
 
         <div className="relative flex h-full flex-col justify-between" style={{ transform: "translateZ(40px)" }}>
           <div className="flex items-start justify-between">
@@ -103,7 +104,7 @@ export function PassportCard({ data, stamp = true }: { data: PassportData; stamp
             initial={{ scale: 2.4, opacity: 0, rotate: -24 }}
             animate={{ scale: 1, opacity: 1, rotate: -12 }}
             transition={{ delay: 0.55, type: "spring", stiffness: 260, damping: 14 }}
-            className={`absolute right-6 bottom-12 rounded-xl border-2 px-3 py-1.5 text-[0.7rem] font-bold tracking-[0.18em] ${
+            className={`absolute right-5 bottom-3 rounded-xl border-2 px-3 py-1.5 text-[0.7rem] font-bold tracking-[0.18em] ${
               data.mlDsa87 ? "border-mint text-mint" : "border-ember text-ember"
             }`}
             style={{ transform: "translateZ(60px)" }}

@@ -14,6 +14,12 @@
  *   npm run conclave execute <id>
  *   npm run conclave cancel <id>
  *   npm run conclave pause                                guardian only
+ *
+ * Upgrades (Conclave runs behind a TransparentUpgradeableProxy owned by itself):
+ *   npm run conclave upgrade-info                         version, implementation, ProxyAdmin
+ *   npm run conclave deploy-implementation                deploy the current build as a new implementation
+ *   npm run conclave propose-upgrade <impl> ["<description>"] [--call <0x data>]
+ *                                                         propose ProxyAdmin.upgradeAndCall; then vote and execute
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -35,7 +41,9 @@ import {
 import {
   conclaveArtifact,
   explain,
+  loadAccount,
   loadMember,
+  proxyAdminArtifact,
   loadRelayer,
   network,
   publicClient,
@@ -205,6 +213,57 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
 
   async pause() {
     await send("pause", []);
+  },
+
+  async "upgrade-info"() {
+    const [version, implementation, proxyAdmin, governed] = await Promise.all([
+      read<string>("version"),
+      read<Address>("implementation"),
+      read<Address>("proxyAdmin"),
+      read<boolean>("upgradesGovernedByDao"),
+    ]);
+    console.log(`Conclave ${dao()}  v${version}`);
+    console.log(`implementation: ${implementation}`);
+    console.log(`ProxyAdmin:     ${proxyAdmin}`);
+    console.log(`upgrades:       ${governed ? "only by an executed post-quantum proposal (ProxyAdmin owned by Conclave)" : "NOT governed by Conclave"}`);
+  },
+
+  async "deploy-implementation"() {
+    // Contract creation needs an unscoped EVM window: `npm run window open` first.
+    const deployer = await loadAccount();
+    await requireLiveWindow(deployer);
+    const { bytecode } = conclaveArtifact();
+    const hash = await walletClient(deployer).deployContract({ abi, bytecode, args: [] });
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success" || !receipt.contractAddress) throw new Error(`Deployment failed: ${txLink(hash)}`);
+    const version = (await pub.readContract({ address: receipt.contractAddress, abi, functionName: "version" })) as string;
+    console.log(`implementation v${version}: ${receipt.contractAddress}\n${txLink(hash)}`);
+    console.log(`Next: npm run conclave propose-upgrade ${receipt.contractAddress} "Upgrade to v${version}"`);
+  },
+
+  async "propose-upgrade"(args) {
+    const callAt = args.indexOf("--call");
+    const call = (callAt >= 0 ? args[callAt + 1] : "0x") as Hex;
+    const rest = callAt >= 0 ? args.slice(0, callAt).concat(args.slice(callAt + 2)) : args;
+    const [impl, ...words] = rest;
+    if (!impl) throw new Error("Usage: npm run conclave propose-upgrade <implementation> [\"<description>\"] [--call <0x data>]");
+    const implementation = toAddress(impl);
+    const code = await pub.getCode({ address: implementation });
+    if (!code || code === "0x") throw new Error(`${implementation} has no code: deploy it first (deploy-implementation)`);
+    const [current, next] = await Promise.all([
+      read<string>("version"),
+      pub.readContract({ address: implementation, abi, functionName: "version" }) as Promise<string>,
+    ]);
+    console.log(`upgrade v${current} -> v${next}`);
+    const proxyAdmin = await read<Address>("proxyAdmin");
+    const data = encodeFunctionData({
+      abi: proxyAdminArtifact().abi,
+      functionName: "upgradeAndCall",
+      args: [dao(), implementation, call],
+    });
+    console.log(`ProxyAdmin ${proxyAdmin}.upgradeAndCall(${dao()}, ${implementation}, ${call})`);
+    await proposeActions([proxyAdmin], [0n], [data], words.join(" ") || `Upgrade Conclave to ${implementation}`);
+    console.log("Members now vote on it; after the timelock anyone can execute it: npm run conclave execute <id>");
   },
 };
 

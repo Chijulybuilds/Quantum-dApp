@@ -56,11 +56,14 @@ always equals deposits minus executed payouts.
 | T14 | Calldata to an EOA "succeeds" | `TargetNotContract` | `test_RevertWhen_CalldataSentToAccountWithoutCode` |
 | T15 | Token returns `false` | `payERC20` with `SafeERC20` | `test_RevertWhen_TokenTransferReturnsFalse` |
 | T16 | Membership changes while votes are open | Epoch: older proposals become Stale | `test_ConfigChangeMakesOpenProposalsStale` |
-| T17 | DAO bricked by an unreachable threshold | Strict majority checked after every change; new members must have a PQ key | `Governance` suite, fuzz on the constructor |
+| T17 | DAO bricked by an unreachable threshold | Strict majority checked after every change; new members must have a PQ key | `Governance` suite, fuzz on the initializer |
 | T18 | Guardian holds the DAO hostage | One-shot fuse; `pauseDuration < gracePeriod`; members can rotate the guardian while paused | `Pause` suite, `testFuzz_PauseNeverOutlastsGrace` |
 | T19 | Front-running relays | Duplicates skipped in `castVotes`; a front-run vote counts for the same member | `test_CastVotes_SkipsVotesAlreadyRelayed` |
 | T20 | Unbounded loops | At most 64 members and 16 actions | `test_AcceptsMaxMembers`, `test_RevertWhen_AddingBeyondMaxMembers` |
 | T21 | Phishing frontend shows one thing, asks to sign another | Members sign readable text naming the action, proposal, hash, DAO and chain | golden tests |
+| T22 | Stolen upgrade key swaps the code (drains the treasury) | There is no upgrade key: the ProxyAdmin is owned by Conclave, so only an executed PQ proposal upgrades; blocked while paused | `test_RevertWhen_UpgradeNotFromDao` (fuzzed caller), `test_UpgradeBlockedWhilePaused`, `test_GovernedUpgrade_*` |
+| T23 | Proxy or implementation initialized by an attacker | `initialize` runs in the proxy's creation transaction (OZ 5.7 requires init data); the implementation disables initializers | `test_RevertWhen_InitializedTwice`, `test_RevertWhen_ImplementationInitialized` |
+| T24 | An upgrade corrupts state (storage collision) | ERC-7201 namespaced storage; layout pinned by a test; the upgrade is all-or-nothing inside `execute` | `test_StorageLayoutIsNamespaced`, `test_RevertWhen_UpgradeToNonContract` |
 
 ML-DSA signatures are randomised, so several valid signatures exist for one message. Conclave never
 uses a signature as an identifier (votes are recorded per member and proposal), so this is harmless.
@@ -71,8 +74,11 @@ uses a signature as an identifier (votes are recorded per member and proposal), 
   compromised member can be removed by the others, even while paused.
 - **Colluding majority.** By design, a majority controls the treasury. The timelock gives the
   minority and the guardian time to react.
+- **A malicious upgrade** is as powerful as a proposal paying out everything, and needs the same
+  majority. Members should read upgrade proposals with care: the app labels them "Upgrade ·
+  implementation → 0x…", and the new code should be verified on the explorer before voting.
 - **Precompile bugs** are outside the contract's control. Every unexpected answer fails closed.
 - **Keccak-256 and quantum computers.** Grover's algorithm leaves about 128-bit preimage security,
   which is considered adequate.
 - **Mainnet.** The PQC precompiles are not active on mainnet yet; Conclave refuses to deploy
-  without them (the constructor checks every member's key).
+  without them (`initialize` checks every member's key).

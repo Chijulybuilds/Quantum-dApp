@@ -3,8 +3,10 @@ import { Route, Routes, useLocation } from "react-router-dom";
 
 import { Nav } from "./components/Nav";
 import { Preloader } from "./components/Preloader";
+import { SmoothScroll } from "./components/SmoothScroll";
 import { ScrollTrigger } from "./lib/motion";
 import { AppPage } from "./pages/AppPage";
+import { Cover } from "./pages/Cover";
 import { Landing } from "./pages/Landing";
 
 function ScrollReset() {
@@ -19,9 +21,13 @@ function ScrollReset() {
 }
 
 export function App() {
+  const { pathname } = useLocation();
+  // The cover is a bare 1920×1080 frame for the project page image.
+  if (pathname === "/cover") return <Cover />;
   return (
     <>
       <Preloader />
+      <SmoothScroll />
       <ScrollReset />
       <Nav />
       <Routes>

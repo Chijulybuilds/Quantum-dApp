@@ -30,9 +30,13 @@ const Env = z.object({
   QORE_EVM_RPC_URL: z.string().url().optional(),
 });
 
-const parsed = Env.safeParse(process.env);
+// Empty lines such as "CONCLAVE_ADDRESS=" (as in .env.example) mean "not set".
+const parsed = Env.safeParse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== "")));
 if (!parsed.success) {
-  for (const issue of parsed.error.issues) console.error(`server/.env: ${issue.path.join(".")}: ${issue.message}`);
+  const problems = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
+  // On Vercel, fail the request with a readable error instead of killing the function.
+  if (process.env.VERCEL) throw new Error(`Conclave environment variables: ${problems.join("; ")}`);
+  for (const problem of problems) console.error(`server/.env: ${problem}`);
   console.error("Create it with: npm run keys");
   process.exit(1);
 }
@@ -58,7 +62,13 @@ export const config = {
   mnemonic: env.CONCLAVE_MNEMONIC,
   founder: getAddress(env.CONCLAVE_FOUNDER),
   port: env.PORT,
-  appOrigins: env.APP_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
+  appOrigins: [
+    ...env.APP_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
+    // On Vercel the app and the API share an origin; these cover a separately hosted app too.
+    ...[process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
+      .filter(Boolean)
+      .map((host) => `https://${host}`),
+  ],
   demoMode: env.DEMO_MODE === "true",
   chainId: preset.chainId, // native chain id (qorechain-diana)
   evmChainId: 9800,

@@ -26,6 +26,8 @@ export interface Dao {
   pausedUntil: string;
   proposalCount: string;
   timing: { votingPeriod: string; timelockDelay: string; gracePeriod: string; pauseDuration: string };
+  /** The proxy's upgrade wiring; null for the first, non-upgradeable Conclave. */
+  upgrades: { version: string; implementation: Address; proxyAdmin: Address; governedByDao: boolean } | null;
 }
 
 export interface Proposal {

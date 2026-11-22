@@ -2,8 +2,8 @@ import { AnimatePresence, animate, motion, useInView, useMotionValueEvent, useSc
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { HeroDevice } from "../components/HeroDevice";
 import { Mark } from "../components/Logo";
+import { QuantumStage } from "../components/QuantumStage";
 import { SplitReveal } from "../components/SplitReveal";
 import { useDao, useProposals } from "../hooks/useConclave";
 import { appConfig } from "../lib/config";
@@ -12,7 +12,7 @@ import { qor } from "../lib/format";
 export function Landing() {
   return (
     <main>
-      <Hero />
+      <QuantumStage />
       <Manifesto />
       <Stats />
       <Stages />
@@ -24,40 +24,6 @@ export function Landing() {
 }
 
 // ---------------------------------------------------------------------------------------------
-
-function Hero() {
-  return (
-    <section className="spotlight relative overflow-hidden px-4 pt-32 pb-24 md:pt-36">
-      <div className="grid-lines absolute inset-0" />
-      <div className="relative mx-auto max-w-5xl text-center">
-        <motion.p className="pill" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }}>
-          <span className="relative h-1.5 w-1.5 rounded-full bg-mint pulse-dot text-mint" />
-          Post-quantum DAO treasury · QoreChain
-        </motion.p>
-        <SplitReveal as="h1" onLoad delay={1.0} className="mx-auto mt-7 max-w-4xl text-[2.6rem] leading-[1.02] font-medium tracking-[-0.035em] md:text-[5.2rem]">
-          The treasury Q-Day can't touch.
-        </SplitReveal>
-        <motion.p
-          className="mx-auto mt-6 max-w-2xl text-lg text-fog md:text-xl"
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.5, duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
-        >
-          Every vote, payout and rule change in Conclave needs an ML-DSA-87 signature, checked on chain by QoreChain's pqcVerify. A stolen ECDSA key can't move a single QOR.
-        </motion.p>
-        <motion.div className="mt-9 flex flex-wrap justify-center gap-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.75 }}>
-          <Link to="/app" className="btn btn-primary">
-            Open the treasury →
-          </Link>
-          <a href="#qday" className="btn btn-ghost">
-            Simulate Q-Day
-          </a>
-        </motion.div>
-      </div>
-      <HeroDevice />
-    </section>
-  );
-}
 
 function Manifesto() {
   return (

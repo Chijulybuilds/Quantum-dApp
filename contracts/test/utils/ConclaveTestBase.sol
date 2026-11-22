@@ -4,11 +4,14 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {Conclave} from "../../src/Conclave.sol";
+import {ConclaveProxy} from "../../src/ConclaveProxy.sol";
 import {IConclave} from "../../src/interfaces/IConclave.sol";
 import {QorePQC} from "../../src/libraries/QorePQC.sol";
 import {MockQorePQC} from "../mocks/MockQorePQC.sol";
 
 /// @notice Shared setup: mock precompiles, three members (2-of-3), a guardian and a funded treasury.
+///         Conclave is deployed as in production: an implementation behind a TransparentUpgradeableProxy
+///         whose ProxyAdmin is owned by the proxy itself.
 /// @dev The messages members sign are rebuilt here from the specification, independently of the
 ///      contract's own message builder, so a drift in the contract's format makes the tests fail.
 abstract contract ConclaveTestBase is Test {
@@ -27,6 +30,8 @@ abstract contract ConclaveTestBase is Test {
     MockQorePQC internal verifier = MockQorePQC(QorePQC.PQC_VERIFY);
 
     Conclave internal conclave;
+    /// @dev The shared implementation every test proxy points at.
+    Conclave internal implementation;
 
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
@@ -49,6 +54,7 @@ abstract contract ConclaveTestBase is Test {
         _registerKey(carol);
         _registerKey(dave);
 
+        implementation = new Conclave();
         conclave = _deploy(_founders(), 2, guardian);
         vm.deal(address(conclave), TREASURY);
         vm.label(address(conclave), "Conclave");
@@ -72,7 +78,25 @@ abstract contract ConclaveTestBase is Test {
     }
 
     function _deploy(address[] memory founders, uint16 needed, address guardian_) internal returns (Conclave) {
-        return new Conclave(founders, needed, guardian_, _timing(), NATIVE_CHAIN_ID);
+        return _deployWith(founders, needed, guardian_, _timing(), NATIVE_CHAIN_ID);
+    }
+
+    /// @dev Deploys a proxy whose ProxyAdmin is owned by the proxy itself: its address is predicted
+    ///      from this contract's nonce, exactly like the production deploy scripts do. The only external
+    ///      call is the proxy creation, so `vm.expectRevert` before this applies to the initializer.
+    function _deployWith(
+        address[] memory founders,
+        uint16 needed,
+        address guardian_,
+        IConclave.Timing memory timing,
+        string memory chainId
+    ) internal returns (Conclave) {
+        address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        bytes memory init = abi.encodeCall(Conclave.initialize, (founders, needed, guardian_, timing, chainId));
+        ConclaveProxy proxy = new ConclaveProxy(address(implementation), predicted, init);
+        // Under vm.expectRevert a failed creation returns a placeholder; only check real deployments.
+        if (address(proxy).code.length != 0) assertEq(address(proxy), predicted, "proxy address prediction");
+        return Conclave(payable(address(proxy)));
     }
 
     // ---------------------------------------------------------------------------------------------

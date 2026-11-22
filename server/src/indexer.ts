@@ -168,6 +168,25 @@ export async function recentActivity(limit = 30) {
   return activity.slice(-limit).reverse();
 }
 
+/**
+ * How Conclave can be upgraded: the proxy's implementation and ProxyAdmin, and whether only the DAO
+ * itself (an executed post-quantum proposal) can upgrade it. Null for the first, non-upgradeable
+ * Conclave, which has none of these functions.
+ */
+async function upgradeInfo() {
+  try {
+    const [version, implementation, proxyAdmin, governedByDao] = await Promise.all([
+      read<string>("version"),
+      read<Address>("implementation"),
+      read<Address>("proxyAdmin"),
+      read<boolean>("upgradesGovernedByDao"),
+    ]);
+    return { version, implementation, proxyAdmin, governedByDao };
+  } catch {
+    return null;
+  }
+}
+
 export async function getDao() {
   const { address } = requireDeployment();
   const [members, threshold, epoch, guardian, guardianArmed, pausedUntil, isPaused, proposalCount, nativeChainId, votingPeriod, timelockDelay, gracePeriod, pauseDuration, balance] =
@@ -187,7 +206,7 @@ export async function getDao() {
       read<bigint>("pauseDuration"),
       publicClient.getBalance({ address }),
     ]);
-  const keys = await Promise.all(members.map((m) => keyStatus(m)));
+  const [keys, upgrades] = await Promise.all([Promise.all(members.map((m) => keyStatus(m))), upgradeInfo()]);
   return {
     address,
     nativeChainId,
@@ -206,5 +225,6 @@ export async function getDao() {
       gracePeriod: gracePeriod.toString(),
       pauseDuration: pauseDuration.toString(),
     },
+    upgrades,
   };
 }

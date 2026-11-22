@@ -5,6 +5,7 @@ import { useAccount, useReadContract } from "wagmi";
 import { conclaveAbi } from "../lib/abi";
 import { api } from "../lib/api";
 import { PQC_KEY_STATUS, appConfig, qorePqcAbi } from "../lib/config";
+import { useQorexIdentity } from "../lib/qorexIdentity";
 
 export function useHealth() {
   return useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000, retry: 1 });
@@ -42,7 +43,12 @@ export function useConclaveAddress(): Address | undefined {
  * from the pqcKeyStatus precompile) and its role in Conclave.
  */
 export function usePassport() {
-  const { address, isConnected, connector } = useAccount();
+  const evm = useAccount();
+  const qorex = useQorexIdentity();
+  // QoreX signs through its native connection, so its account is the member identity.
+  const address = qorex?.address ?? evm.address;
+  const isConnected = Boolean(qorex) || evm.isConnected;
+  const connector = qorex ? { name: "QoreX" } : evm.connector;
   const conclave = useConclaveAddress();
   const dao = useDao();
 

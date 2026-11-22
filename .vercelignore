@@ -1,0 +1,12 @@
+# Never upload secrets (server/.env holds the testnet recovery phrase) or local builds.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+.vercel
+app/dist
+contracts/out
+contracts/cache
+contracts/broadcast
+contracts/lib
+contracts/coverage

@@ -3,9 +3,10 @@ import { AnimatePresence, animate, motion, useMotionValue, useSpring, useTransfo
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { useAccount, useConnect, useDisconnect, type Connector } from "wagmi";
+import { useConnect, useDisconnect, type Connector } from "wagmi";
 
-import { usePassport } from "../hooks/useConclave";
+import { useConclaveAddress, usePassport } from "../hooks/useConclave";
+import { connectQorexNative, disconnectQorexNative } from "../lib/qorexIdentity";
 import { appConfig } from "../lib/config";
 import { short } from "../lib/format";
 import { LatticeField } from "./LatticeField";
@@ -19,7 +20,7 @@ type Step = "closed" | "choose" | "handshake" | "passport";
  * ML-DSA-87 key, watch the chain check your key and membership, then receive your Q-Passport.
  */
 export function SealConnect({ compact = false }: { compact?: boolean }) {
-  const { isConnected, address } = useAccount();
+  const { isConnected, address } = usePassport();
   const [step, setStep] = useState<Step>("closed");
 
   return (
@@ -129,6 +130,7 @@ function Airlock({ step, setStep }: { step: Step; setStep: (s: Step) => void }) 
   const { disconnect } = useDisconnect();
   const { openConnectModal } = useConnectModal();
   const passport = usePassport();
+  const conclave = useConclaveAddress();
   const [error, setError] = useState<string>();
   const [checks, setChecks] = useState(0);
 
@@ -163,7 +165,13 @@ function Airlock({ step, setStep }: { step: Step; setStep: (s: Step) => void }) 
     setError(undefined);
     setStep("handshake");
     try {
-      await connectAsync({ connector });
+      if (isQorex(connector)) {
+        // The native connection gives the account that signs; the EVM link is optional.
+        await connectQorexNative();
+        connectAsync({ connector }).catch(() => undefined);
+      } else {
+        await connectAsync({ connector });
+      }
     } catch (err) {
       setStep("choose");
       const msg = err instanceof Error ? err.message : String(err);
@@ -171,11 +179,24 @@ function Airlock({ step, setStep }: { step: Step; setStep: (s: Step) => void }) 
     }
   };
 
+  // Never hang in the handshake: if no account arrives, say why.
+  useEffect(() => {
+    if (step !== "handshake") return;
+    const t = setTimeout(() => {
+      if (!passport.address) {
+        setStep("choose");
+        setError("The wallet did not share an account. Unlock it, switch it to Testnet, approve the connection and try again.");
+      }
+    }, 12_000);
+    return () => clearTimeout(t);
+  }, [step, passport.address, setStep]);
+
   return (
     <AnimatePresence>
       {step !== "closed" && (
         <motion.div
           className="fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-ink/80 px-4 py-10 backdrop-blur-xl"
+          data-lenis-prevent
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -253,10 +274,12 @@ function Airlock({ step, setStep }: { step: Step; setStep: (s: Step) => void }) 
                     </h2>
                     <p className="mt-3 text-fog">
                       {passport.key.mlDsa87
-                        ? passport.isMember
-                          ? "You can propose and vote. Every signature you give is checked on chain by pqcVerify."
-                          : "You are not a member, but you can follow the treasury, verify votes and execute passed proposals."
-                        : "Register your ML-DSA-87 key in QoreX (Testnet) first: without it, nothing in Conclave can be signed in your name."}
+                        ? !conclave
+                          ? "Your passport is ready. Conclave is not deployed on testnet yet; once it is, your key is what votes."
+                          : passport.isMember
+                            ? "You can propose and vote. Every signature you give is checked on chain by pqcVerify."
+                            : "You are not a member, but you can follow the treasury, verify votes and execute passed proposals."
+                        : "Register your ML-DSA-87 key first, from QoreX or the QoreChain Dashboard (Testnet). Without it, nothing in Conclave can be signed in your name. Then reconnect."}
                     </p>
                     <div className="mt-7 flex flex-wrap gap-3">
                       <button
@@ -274,6 +297,7 @@ function Airlock({ step, setStep }: { step: Step; setStep: (s: Step) => void }) 
                         className="btn btn-ghost"
                         onClick={() => {
                           disconnect();
+                          disconnectQorexNative();
                           setStep("closed");
                         }}
                       >

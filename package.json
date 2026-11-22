@@ -5,7 +5,7 @@
   "description": "Conclave: a DAO treasury on QoreChain that only moves on post-quantum (ML-DSA-87) votes.",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=20.19"
   },
   "scripts": {
     "install:all": "npm install && npm --prefix server ci && npm --prefix app ci && npm --prefix contracts ci",
@@ -13,6 +13,8 @@
     "keys": "npm --prefix server run keys",
     "presetup:testnet": "node scripts/check-install.mjs",
     "setup:testnet": "npm --prefix server run setup:testnet",
+    "preredeploy:testnet": "node scripts/check-install.mjs",
+    "redeploy:testnet": "npm --prefix server run redeploy:testnet",
     "predev": "node scripts/check-install.mjs",
     "dev": "concurrently --kill-others-on-fail -n relayer,app -c magenta,cyan \"npm --prefix server run dev\" \"npm --prefix app run dev\"",
     "predev:app": "node scripts/check-install.mjs",
@@ -21,6 +23,7 @@
     "dev:server": "npm --prefix server run dev",
     "prebuild": "node scripts/check-install.mjs",
     "build": "npm --prefix app run build",
+    "build:vercel": "node scripts/vercel-build.mjs",
     "pretest": "node scripts/check-install.mjs",
     "test": "npm --prefix server test && cd contracts && forge test"
   },
