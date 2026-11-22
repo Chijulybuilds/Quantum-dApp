@@ -2,6 +2,8 @@
 
 **A DAO treasury that only moves on post-quantum votes.**
 
+![Conclave: the treasury Q-Day can't touch](docs/cover.png)
+
 Built for the **Post-Quantum dApp** bounty of *Build Before Q-Day: the QoreChain Developer Fest*.
 
 [![Built on QoreChain](https://build.qorechain.io/badge/conclave.svg)](https://build.qorechain.io/p/conclave)

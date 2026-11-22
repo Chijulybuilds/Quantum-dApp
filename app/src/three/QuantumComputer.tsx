@@ -19,12 +19,20 @@ export interface StageSignals {
 }
 
 export const PLATES = [
-  { y: 3.0, r: 2.05, temp: "50 K" },
-  { y: 1.55, r: 1.86, temp: "4 K" },
-  { y: 0.15, r: 1.7, temp: "800 mK" },
-  { y: -1.25, r: 1.55, temp: "100 mK" },
-  { y: -2.55, r: 1.4, temp: "15 mK" },
+  { y: 3.0, r: 2.05, temp: "50 K", name: "First stage" },
+  { y: 1.55, r: 1.86, temp: "4 K", name: "Second stage" },
+  { y: 0.15, r: 1.7, temp: "800 mK", name: "Still" },
+  { y: -1.25, r: 1.55, temp: "100 mK", name: "Cold plate" },
+  { y: -2.55, r: 1.4, temp: "15 mK", name: "Mixing chamber" },
 ] as const;
+
+/** A fixed, deterministic pose (used to render the project cover). */
+export interface StillPose {
+  camera: [number, number, number];
+  target: [number, number, number];
+  rotation: number;
+  glint: [number, number, number];
+}
 
 // Camera keyframes: [progress, camera y, distance, chandelier x offset (desktop)]
 const KEYS: [number, number, number, number][] = [
@@ -392,7 +400,7 @@ function Pulses({ signals }: { signals: StageSignals }) {
 // Scene rig: scroll choreography, drag with inertia, pointer glint
 // ---------------------------------------------------------------------------------------------
 
-function Rig({ signals, stage, dense }: { signals: StageSignals; stage: number; dense: boolean }) {
+function Rig({ signals, stage, dense, still }: { signals: StageSignals; stage: number; dense: boolean; still?: StillPose }) {
   const offset = useRef<THREE.Group>(null);
   const spin = useRef<THREE.Group>(null);
   const glint = useRef<THREE.PointLight>(null);
@@ -402,6 +410,14 @@ function Rig({ signals, stage, dense }: { signals: StageSignals; stage: number; 
   const wide = size.width / size.height > 1.15;
 
   useFrame((state, dt) => {
+    if (still) {
+      camera.position.set(...still.camera);
+      camera.lookAt(...still.target);
+      if (spin.current) spin.current.rotation.set(0, still.rotation, 0);
+      if (offset.current) offset.current.position.x = 0;
+      glint.current?.position.set(...still.glint);
+      return;
+    }
     const target = signals.progress.current;
     smooth.current += (target - smooth.current) * Math.min(1, dt * 4);
     const p = smooth.current;
@@ -434,24 +450,46 @@ function Rig({ signals, stage, dense }: { signals: StageSignals; stage: number; 
             <pointLight key={i} position={[0, p.y - 0.7, 0]} color="#ff9a45" intensity={4.5} distance={3.2} />
           ))}
         </group>
-        {PLATES.map((p, i) => (
-          <Html key={p.temp} position={[p.r + 0.35, p.y + 0.05, 0]} distanceFactor={6.5} zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
-            <div
-              className={`whitespace-nowrap rounded-full border px-3 py-1 font-mono text-[13px] transition-all duration-500 ${
-                stage === i ? "border-mint/70 bg-mint/15 text-mint" : "border-white/10 bg-black/30 text-white/40"
-              }`}
-            >
-              {p.temp}
-            </div>
-          </Html>
-        ))}
+        {PLATES.map((p, i) =>
+          still ? (
+            <Html key={p.temp} position={[p.r + 0.08, p.y, 0]} zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
+              <div className="flex -translate-y-1/2 items-center gap-3 whitespace-nowrap font-mono">
+                <span className="h-px w-28 bg-white/35" />
+                <span className="h-1.5 w-1.5 rounded-full bg-mint" />
+                <span className="rounded-md bg-ink/85 px-2 py-0.5 text-[15px] text-white">
+                  {p.temp} <span className="text-[13px] text-white/50">{p.name}</span>
+                </span>
+              </div>
+            </Html>
+          ) : (
+            <Html key={p.temp} position={[p.r + 0.35, p.y + 0.05, 0]} distanceFactor={6.5} zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
+              <div
+                className={`whitespace-nowrap rounded-full border px-3 py-1 font-mono text-[13px] transition-all duration-500 ${
+                  stage === i ? "border-mint/70 bg-mint/15 text-mint" : "border-white/10 bg-black/30 text-white/40"
+                }`}
+              >
+                {p.temp}
+              </div>
+            </Html>
+          ),
+        )}
       </group>
     </>
   );
 }
 
-export default function QuantumComputer({ signals, stage, active }: { signals: StageSignals; stage: number; active: boolean }) {
-  const dense = typeof window !== "undefined" && window.innerWidth > 900;
+export default function QuantumComputer({
+  signals,
+  stage,
+  active,
+  still,
+}: {
+  signals: StageSignals;
+  stage: number;
+  active: boolean;
+  still?: StillPose;
+}) {
+  const dense = Boolean(still) || (typeof window !== "undefined" && window.innerWidth > 900);
   return (
     <Canvas
       frameloop={active ? "always" : "never"}
@@ -471,11 +509,17 @@ export default function QuantumComputer({ signals, stage, active }: { signals: S
         <Lightformer form="rect" intensity={1.6} color="#a28bff" position={[6, -1, 2]} rotation-y={-Math.PI / 2} scale={[8, 3, 1]} />
         <Lightformer form="ring" intensity={2} color="#ffb86b" position={[0, -6, 3]} scale={4} />
       </Environment>
-      <Rig signals={signals} stage={stage} dense={dense} />
-      <EffectComposer multisampling={0}>
-        <Bloom mipmapBlur luminanceThreshold={0.82} luminanceSmoothing={0.2} intensity={0.75} />
-        <Vignette eskil={false} offset={0.25} darkness={0.75} />
-      </EffectComposer>
+      <Rig signals={signals} stage={stage} dense={dense} still={still} />
+      {still ? (
+        <EffectComposer multisampling={4}>
+          <Bloom mipmapBlur luminanceThreshold={0.82} luminanceSmoothing={0.2} intensity={0.7} />
+        </EffectComposer>
+      ) : (
+        <EffectComposer multisampling={0}>
+          <Bloom mipmapBlur luminanceThreshold={0.82} luminanceSmoothing={0.2} intensity={0.75} />
+          <Vignette eskil={false} offset={0.25} darkness={0.75} />
+        </EffectComposer>
+      )}
     </Canvas>
   );
 }
