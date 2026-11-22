@@ -12,6 +12,9 @@ contracts/broadcast/
 node_modules/
 contracts/coverage/
 app/dist/
+
+# Vercel (project link and build output)
+.vercel/
 lcov.info
 
 # OS / editors

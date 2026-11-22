@@ -60,7 +60,8 @@ async function send(functionName: string, args: readonly unknown[]): Promise<Rel
     } catch (err) {
       throw contractError(err);
     }
-    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 90_000 });
+    // Vercel stops a function after 60 s, so give up early there and report it cleanly.
+    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: process.env.VERCEL ? 45_000 : 90_000 });
     let proposalId: string | undefined;
     for (const log of receipt.logs) {
       try {

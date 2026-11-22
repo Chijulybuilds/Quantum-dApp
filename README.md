@@ -147,14 +147,23 @@ Needs Node.js 20.19 or newer (`node -v`). Foundry is only needed to build and te
 ```bash
 npm run install:all     # installs root, server, app and contract-script dependencies
 npm run keys            # creates server/.env (testnet recovery phrase) and prints the relayer address
-# claim at least 3 test QOR for the relayer at https://dashboard.qorechain.io/faucet
+# claim at least 2.5 test QOR for the relayer at https://dashboard.qorechain.io/faucet
 npm run setup:testnet   # registers keys, funds demo accounts, deploys Conclave, opens the scoped window
 npm run dev             # relayer on http://localhost:8787 + app on http://localhost:5173
 ```
 
 Contracts on their own: `cd contracts && forge build && forge test`.
 
-The app is published to GitHub Pages by [`pages.yml`](.github/workflows/pages.yml)
+### Deploy to Vercel
+
+The repository deploys to Vercel as one project: the app as static files and the relayer as a
+Node.js function at `/api`, on the same domain. Import the repository, add `CONCLAVE_MNEMONIC`,
+`CONCLAVE_ADDRESS` and `CONCLAVE_DEPLOY_BLOCK`, and deploy. Step by step:
+[docs/DEPLOY.md](docs/DEPLOY.md).
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FChijulybuilds%2FQuantum-dApp&env=CONCLAVE_MNEMONIC,CONCLAVE_ADDRESS,CONCLAVE_DEPLOY_BLOCK&envDescription=Relayer%20recovery%20phrase%20(testnet%20only)%20and%20the%20deployed%20Conclave&envLink=https%3A%2F%2Fgithub.com%2FChijulybuilds%2FQuantum-dApp%2Fblob%2Fmain%2Fdocs%2FDEPLOY.md&project-name=conclave)
+
+The app can also be published alone to GitHub Pages by [`pages.yml`](.github/workflows/pages.yml)
 (set the repository variable `CONCLAVE_API_URL` to the public relayer URL). QoreX mobile needs a
 public HTTPS address, so test the mobile wallet on the published app.
 
@@ -172,11 +181,13 @@ contracts/test/                            Foundry unit, fuzz and invariant test
 contracts/test-ffi/                        differential tests against QoreSign
 contracts/scripts/                         window, deploy, member CLI, live precompile check
 server/src/                                relayer, indexer, window keeper, testnet bootstrap
+scripts/vercel-build.mjs                   Vercel build: static app + bundled /api function
 app/src/                                   web app: landing, airlock connect, Q-Passport, dashboard
 docs/ARCHITECTURE.md                       design, message format, decisions
 docs/THREAT_MODEL.md                       Q-Day threat model and mitigations
 docs/AUDIT.md                              two-stage QCAI audit workbook and PQC design notes
 docs/EVIDENCE.md                           testnet evidence
+docs/DEPLOY.md                             deploying the app and relayer on Vercel
 AI_USAGE.md                                how AI was used
 ```
 
