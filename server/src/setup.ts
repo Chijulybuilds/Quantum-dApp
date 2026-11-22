@@ -42,7 +42,7 @@ const TIMING = {
   gracePeriod: 604_800n, // 7 days
   pauseDuration: 1_800n, // 30 minutes
 };
-const TREASURY_SEED = process.env.TREASURY_SEED_QOR ?? "1";
+const TREASURY_SEED = process.env.TREASURY_SEED_QOR || "0.5";
 
 async function registerKey(label: string, acc: UnifiedAccount): Promise<void> {
   const status = await fetchPqcStatus({ rest: config.rest, address: acc.cosmos });
@@ -147,17 +147,21 @@ async function main(): Promise<void> {
   console.log("1. Relayer");
   const relayerBalance = await balanceUqor(relayer.cosmos);
   console.log(`  ${relayer.cosmos}  ${fmt(relayerBalance)}`);
-  if (relayerBalance < 3n * QOR) {
-    console.log(`\nThe relayer needs at least 3 test QOR. Claim from https://dashboard.qorechain.io/faucet to:\n  ${relayer.cosmos}`);
+  if (relayerBalance < 2_500_000n) {
+    console.log(
+      `\nThe relayer needs at least 2.5 test QOR (it has ${fmt(relayerBalance)}). Claim from https://dashboard.qorechain.io/faucet,` +
+        ` or send test QOR from your QoreX wallet, to:\n  ${relayer.cosmos}`,
+    );
     process.exitCode = 1;
     return;
   }
   await registerKey("relayer", relayer);
 
   console.log("2. Demo members and guardian");
-  await fund(relayer, "demo A", demoA, 200_000n, 500_000n);
-  await fund(relayer, "demo B", demoB, 200_000n, 500_000n);
-  await fund(relayer, "guardian", guardian, 300_000n, 800_000n);
+  // Demo members only pay the key registration fee; the guardian also opens a window to pause.
+  await fund(relayer, "demo A", demoA, 150_000n, 250_000n);
+  await fund(relayer, "demo B", demoB, 150_000n, 250_000n);
+  await fund(relayer, "guardian", guardian, 300_000n, 500_000n);
   await registerKey("demo A", demoA);
   await registerKey("demo B", demoB);
   await registerKey("guardian", guardian);

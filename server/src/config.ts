@@ -30,7 +30,8 @@ const Env = z.object({
   QORE_EVM_RPC_URL: z.string().url().optional(),
 });
 
-const parsed = Env.safeParse(process.env);
+// Empty lines such as "CONCLAVE_ADDRESS=" (as in .env.example) mean "not set".
+const parsed = Env.safeParse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== "")));
 if (!parsed.success) {
   for (const issue of parsed.error.issues) console.error(`server/.env: ${issue.path.join(".")}: ${issue.message}`);
   console.error("Create it with: npm run keys");
