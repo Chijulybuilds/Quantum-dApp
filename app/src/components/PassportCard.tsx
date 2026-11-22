@@ -63,6 +63,7 @@ export function PassportCard({ data, stamp = true }: { data: PassportData; stamp
         />
         <div className="grid-lines absolute inset-0 opacity-60" />
         <motion.div className="absolute inset-0 mix-blend-overlay" style={{ background: sheen }} />
+        <div className="sheen-sweep mix-blend-overlay" aria-hidden />
 
         <div className="relative flex h-full flex-col justify-between" style={{ transform: "translateZ(40px)" }}>
           <div className="flex items-start justify-between">
