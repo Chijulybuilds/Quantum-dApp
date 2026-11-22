@@ -89,9 +89,28 @@ function TreasuryCard() {
         </AnimatePresence>
       </div>
       {dao.data && (
-        <a href={addressUrl(dao.data.address)} target="_blank" rel="noreferrer" className="hash relative text-xs text-fog transition-colors hover:text-white">
-          {short(dao.data.address, 8, 6)} ↗
-        </a>
+        <div className="relative flex flex-wrap items-center gap-x-3 gap-y-1">
+          <a href={addressUrl(dao.data.address)} target="_blank" rel="noreferrer" className="hash text-xs text-fog transition-colors hover:text-white">
+            {short(dao.data.address, 8, 6)} ↗
+          </a>
+          {dao.data.upgrades && (
+            <a
+              href={addressUrl(dao.data.upgrades.implementation)}
+              target="_blank"
+              rel="noreferrer"
+              title={
+                dao.data.upgrades.governedByDao
+                  ? "Upgradeable only by an executed post-quantum proposal: the ProxyAdmin is owned by Conclave"
+                  : "Warning: the ProxyAdmin is not owned by Conclave"
+              }
+              className={`rounded-full px-2 py-0.5 text-[0.68rem] transition-colors ${
+                dao.data.upgrades.governedByDao ? "bg-white/6 text-fog hover:text-white" : "bg-ember/15 text-ember"
+              }`}
+            >
+              v{dao.data.upgrades.version} · {dao.data.upgrades.governedByDao ? "upgrades by vote" : "upgrade key not the DAO"}
+            </a>
+          )}
+        </div>
       )}
     </LiveCard>
   );

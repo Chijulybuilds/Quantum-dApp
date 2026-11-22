@@ -114,34 +114,68 @@ Conclave itself, without value, can execute (`unpause`, `setGuardian`, `addMembe
 `setThreshold`), so members can remove a compromised member or rotate the guardian. Deployment
 enforces `pauseDuration < gracePeriod`, so a pause can delay a queued payout but never expire it.
 
+## Upgrades
+
+Conclave is an implementation behind `ConclaveProxy`, an unmodified OpenZeppelin 5.7
+`TransparentUpgradeableProxy`. The proxy address is the DAO: it holds the treasury and all state,
+and it is what members sign for (`dao:` in every message), so signatures and history survive an
+upgrade.
+
+- **No upgrade key.** The proxy creates a `ProxyAdmin` whose owner is the proxy itself (its address
+  is predicted from the deployer's nonce, which the deploy pins). Upgrading means calling
+  `ProxyAdmin.upgradeAndCall` from Conclave, which only an executed proposal can do: the same
+  post-quantum quorum and timelock as a payout. `upgradesGovernedByDao()` checks this on chain; the
+  deploy scripts and the app check it too.
+- **Blocked while paused.** The ProxyAdmin is not Conclave, so an upgrade is not one of the
+  governance actions allowed during a pause. The pause cannot outlast the grace period, so a queued
+  upgrade can still run after it.
+- **Atomic initialization.** The proxy is created with the `initialize` call in the same
+  transaction (OZ 5.7 refuses a proxy without init data), so it cannot be initialized by someone
+  else first. The implementation's constructor calls `_disableInitializers()`.
+- **Freeze.** A proposal calling `ProxyAdmin.renounceOwnership()` makes the code permanent.
+
 ## Storage and gas
 
-| Slot(s) | Content |
+All state lives in one ERC-7201 namespace, `conclave.storage.Conclave`
+(slot `0xcf22…6d00`), so a new version can append fields without collisions, and inherited
+contracts (`Initializable`, `ReentrancyGuard`) keep their own namespaces.
+
+| Slot (from the namespace) | Content |
 |---|---|
-| 1 | `guardian` (20) · `guardianArmed` (1) · `pausedUntil` (8) |
-| 2 | `threshold` (2) · `epoch` (4) · `proposalCount` (8) |
+| +0 | `votingPeriod` · `timelockDelay` · `gracePeriod` · `pauseDuration` (8 bytes each) |
+| +1 | `nativeChainId` (ShortString) |
+| +2 | `guardian` (20) · `guardianArmed` (1) · `pausedUntil` (8) · `threshold` (2) |
+| +3 | `epoch` (4) · `proposalCount` (8) |
+| +4 … +8 | `members`, `memberPosition`, `proposeNonce`, `proposals`, `hasVoted` |
 | per proposal ×3 | `proposalHash` · `proposer`, `voteEnd`, `epoch` · `eta`, vote counts, flags |
+
+`test_StorageLayoutIsNamespaced` pins this layout, so a change that moves a field fails the tests.
 
 - Actions are not stored, only committed to by `proposalHash` and published in `ProposalCreated`.
 - Public keys (2,592 bytes = 81 slots) are never stored: they are read from `pqcKeyStatus` on
   every check, which also makes key rotation and revocation take effect immediately.
-- Timing and the native chain id are immutables; errors are custom errors.
-- Compiled with solc 0.8.28, `via_ir`, optimizer 1,000 runs, Cancun target. Runtime size 13.4 KB.
+- Timing lives in one packed slot (it was immutables before the proxy); errors are custom errors.
+- Compiled with solc 0.8.28, `via_ir`, optimizer 1,000 runs, Cancun target. Runtime size 17.5 KB
+  (implementation) and 1.0 KB (proxy).
 
 Measured costs: `castVote` ≈ 146k gas of contract logic; the live `pqcVerify` precompile adds
-≈ 185k and the 4,627-byte signature ≈ 74k of calldata, about 400k gas in total.
+≈ 185k and the 4,627-byte signature ≈ 74k of calldata, about 400k gas in total. The proxy adds
+about 8–10k per call (a `DELEGATECALL` and the slots that were immutables).
 
 ## Deployment
 
-`forge script` simulates the constructor in Foundry's local EVM, which has no QoreChain
-precompiles, so the member key checks would fail. [`scripts/deploy.ts`](../contracts/scripts/deploy.ts)
-checks every member's key with `pqcKeyStatus`, the threshold and the deployer's window, then sends
-the deployment directly. Testnet only: the PQC precompiles are not active on mainnet yet.
+`forge script` simulates deployments in Foundry's local EVM, which has no QoreChain precompiles,
+so the member key checks in `initialize` would fail. [`scripts/deploy.ts`](../contracts/scripts/deploy.ts)
+and the testnet bootstrap (`server/src/setup.ts`) check every member's key with `pqcKeyStatus`,
+the threshold and the deployer's window, then send two transactions: the implementation, then the
+proxy with `initialize`, and verify on chain that the ProxyAdmin is owned by Conclave. Testnet
+only: the PQC precompiles are not active on mainnet yet.
 
 ## Design decisions
 
 | Decision | Why | Alternative considered |
 |---|---|---|
+| Transparent proxy whose ProxyAdmin is owned by the DAO | Fixes and features can ship at the same address without giving anyone an upgrade key: an upgrade needs the same PQ quorum and timelock as a payout | Immutable contract (no fixes); UUPS (upgrade logic in the implementation, a bad upgrade can brick it); an EOA or multisig ProxyAdmin owner (a classical key that could swap the code on Q-Day) |
 | Key from `pqcKeyStatus`, never from calldata | A signature can only count for the account that registered the key | Caller-supplied key: anyone could sign with their own key |
 | Signer address inside every message | Two accounts may register the same (non address-bound) key | Rely on the key only |
 | Relayed signatures, `msg.sender` ignored | On Q-Day a classical key may still use an open window | `msg.sender == member`: broken by a leaked ECDSA key |

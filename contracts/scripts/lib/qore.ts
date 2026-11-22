@@ -108,8 +108,9 @@ export async function loadMember(): Promise<UnifiedAccount> {
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-export function conclaveArtifact(): { abi: Abi; bytecode: Hex } {
-  const path = resolve(here, "../../out/Conclave.sol/Conclave.json");
+/** A Foundry artifact from out/ (run `forge build` first). */
+export function foundryArtifact(file: string, name: string): { abi: Abi; bytecode: Hex } {
+  const path = resolve(here, `../../out/${file}/${name}.json`);
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
@@ -119,6 +120,13 @@ export function conclaveArtifact(): { abi: Abi; bytecode: Hex } {
   const json = JSON.parse(raw) as { abi: Abi; bytecode: { object: Hex } };
   return { abi: json.abi, bytecode: json.bytecode.object };
 }
+
+/** The Conclave implementation. */
+export const conclaveArtifact = () => foundryArtifact("Conclave.sol", "Conclave");
+/** ConclaveProxy: an OpenZeppelin TransparentUpgradeableProxy. */
+export const proxyArtifact = () => foundryArtifact("ConclaveProxy.sol", "ConclaveProxy");
+/** OpenZeppelin ProxyAdmin (owned by Conclave itself). */
+export const proxyAdminArtifact = () => foundryArtifact("ProxyAdmin.sol", "ProxyAdmin");
 
 export function conclaveAddress(): Address {
   const raw = process.env.CONCLAVE_ADDRESS?.trim();

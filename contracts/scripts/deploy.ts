@@ -1,5 +1,8 @@
 /**
- * deploy.ts - deploys Conclave to the QoreChain testnet after pre-flight checks.
+ * deploy.ts - deploys Conclave to the QoreChain testnet after pre-flight checks: the implementation,
+ * then ConclaveProxy (an OpenZeppelin TransparentUpgradeableProxy) initialized in the same
+ * transaction, whose ProxyAdmin is owned by the proxy itself. Only an executed post-quantum
+ * proposal can upgrade it. The window must allow 2 transactions (`npm run window open`).
  *
  *   forge build && npm run window open && npm run deploy:testnet
  *
@@ -12,8 +15,8 @@
  *   CONCLAVE_GRACE_PERIOD     seconds (default 604800 = 7 days)
  *   CONCLAVE_PAUSE_DURATION   seconds (default 86400 = 1 day; must be below the grace period)
  *
- * Foundry's local EVM has no QoreChain precompiles, so `forge script` cannot simulate the
- * constructor (it checks every member's ML-DSA-87 key). This script sends the deployment
+ * Foundry's local EVM has no QoreChain precompiles, so `forge script` cannot simulate
+ * `initialize` (it checks every member's ML-DSA-87 key). This script sends the deployment
  * straight to the chain, where the real precompiles run.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -21,11 +24,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pqcKeyStatus, toEvmAddress } from "@qorechain/evm";
-import { getAddress, zeroAddress, type Address } from "viem";
+import { encodeFunctionData, getAddress, getContractAddress, zeroAddress, type Address } from "viem";
 
 import {
   conclaveArtifact,
   explain,
+  proxyArtifact,
   loadAccount,
   network,
   publicClient,
@@ -77,23 +81,45 @@ async function main(): Promise<void> {
   console.log(`deployer:  ${deployer.evm}`);
   await requireLiveWindow(deployer);
 
-  // ---- Deploy -----------------------------------------------------------------------------
+  // ---- Deploy: implementation, then the proxy -------------------------------------------
+  const wallet = walletClient(deployer);
   const { abi, bytecode } = conclaveArtifact();
-  const hash = await walletClient(deployer).deployContract({
-    abi,
-    bytecode,
-    args: [members, threshold, guardian, timing, net.chainId],
-  });
-  console.log(`sent:      ${hash}`);
+  const implTx = await wallet.deployContract({ abi, bytecode, args: [] });
+  console.log(`sent:      implementation ${implTx}`);
+  const implReceipt = await pub.waitForTransactionReceipt({ hash: implTx });
+  if (implReceipt.status !== "success" || !implReceipt.contractAddress) throw new Error(`Implementation deployment failed: ${txLink(implTx)}`);
+  const implementation = implReceipt.contractAddress;
+
+  // The ProxyAdmin's owner is the proxy's own address, predicted from the deployer's nonce. The
+  // nonce is pinned, so the transaction either lands exactly there or is rejected.
+  const nonce = await pub.getTransactionCount({ address: deployer.evm as Address, blockTag: "pending" });
+  const predicted = getContractAddress({ from: deployer.evm as Address, nonce: BigInt(nonce) });
+  const init = encodeFunctionData({ abi, functionName: "initialize", args: [members, threshold, guardian, timing, net.chainId] });
+  const proxy = proxyArtifact();
+  const hash = await wallet.deployContract({ abi: proxy.abi, bytecode: proxy.bytecode, args: [implementation, predicted, init], nonce });
+  console.log(`sent:      proxy ${hash}`);
   const receipt = await pub.waitForTransactionReceipt({ hash });
-  if (receipt.status !== "success" || !receipt.contractAddress) throw new Error(`Deployment failed: ${txLink(hash)}`);
+  if (receipt.status !== "success" || !receipt.contractAddress) throw new Error(`Proxy deployment failed: ${txLink(hash)}`);
+  const address = receipt.contractAddress;
+
+  const read = (functionName: string) => pub.readContract({ address, abi, functionName });
+  const [impl, proxyAdmin, governed, version] = (await Promise.all([
+    read("implementation"),
+    read("proxyAdmin"),
+    read("upgradesGovernedByDao"),
+    read("version"),
+  ])) as [Address, Address, boolean, string];
+  if (address.toLowerCase() !== predicted.toLowerCase() || impl.toLowerCase() !== implementation.toLowerCase() || !governed) {
+    throw new Error(`Proxy wiring check failed: proxy ${address}, implementation ${impl}, governed by the DAO: ${governed}`);
+  }
 
   const out = {
     network: net.chainId,
     evmChainId,
-    address: receipt.contractAddress,
+    address,
     deployTx: hash,
     blockNumber: receipt.blockNumber.toString(),
+    proxy: { kind: "TransparentUpgradeableProxy", implementation, proxyAdmin, proxyAdminOwner: address, version, implementationTx: implTx },
     members,
     threshold,
     guardian,
@@ -103,8 +129,9 @@ async function main(): Promise<void> {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
 
-  console.log(`\nConclave:  ${receipt.contractAddress}\n${txLink(hash)}`);
-  console.log(`Saved to deployments/testnet.json. Put CONCLAVE_ADDRESS=${receipt.contractAddress} in .env.`);
+  console.log(`\nConclave:  ${address}  (v${version})\n${txLink(hash)}`);
+  console.log(`implementation ${implementation}, ProxyAdmin ${proxyAdmin} owned by Conclave`);
+  console.log(`Saved to deployments/testnet.json. Put CONCLAVE_ADDRESS=${address} in .env.`);
 }
 
 main().catch((err: unknown) => {

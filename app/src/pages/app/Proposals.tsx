@@ -8,7 +8,7 @@ import { SealConnect } from "../../components/SealConnect";
 import { SealedCheck, SignAction } from "../../components/SignAction";
 import { useConclaveAddress, useDao, useHealth, usePassport, useProposals, useRefreshAll } from "../../hooks/useConclave";
 import { useNow } from "../../hooks/useNow";
-import { conclaveAbi } from "../../lib/abi";
+import { conclaveAbi, proxyAdminAbi } from "../../lib/abi";
 import { api, type Proposal } from "../../lib/api";
 import { txUrl } from "../../lib/config";
 import { duration, nowSeconds, short } from "../../lib/format";
@@ -80,7 +80,8 @@ export function Plus() {
 
 function ProposalRow({ p, need, index, onOpen }: { p: Proposal; need: number; index: number; onOpen: () => void }) {
   const conclave = useConclaveAddress();
-  const actions = decodeActions(p, conclave);
+  const dao = useDao();
+  const actions = decodeActions(p, conclave, dao.data?.upgrades?.proxyAdmin);
   return (
     <motion.button
       type="button"
@@ -192,10 +193,24 @@ interface DecodedAction {
   detail: string;
 }
 
-function decodeActions(p: Proposal, conclave?: Address): DecodedAction[] {
+function decodeActions(p: Proposal, conclave?: Address, proxyAdmin?: Address): DecodedAction[] {
   return p.targets.map((target, i) => {
     const value = BigInt(p.values[i] ?? "0");
     const data = p.calldatas[i] ?? "0x";
+    // Upgrades go through the ProxyAdmin, which only Conclave itself owns.
+    if (proxyAdmin && target.toLowerCase() === proxyAdmin.toLowerCase() && data !== "0x") {
+      try {
+        const d = decodeFunctionData({ abi: proxyAdminAbi, data });
+        if (d.functionName === "upgradeAndCall") {
+          const [, implementation, migration] = d.args as [Address, Address, `0x${string}`];
+          return { label: "Upgrade", detail: `implementation → ${short(implementation)}${migration !== "0x" ? " + migration" : ""}` };
+        }
+        if (d.functionName === "renounceOwnership") return { label: "Freeze", detail: "no further upgrades, ever" };
+        if (d.functionName === "transferOwnership") return { label: "Upgrade rights", detail: `hand over → ${short(d.args[0] as Address)}` };
+      } catch {
+        /* fall through */
+      }
+    }
     if (conclave && target.toLowerCase() === conclave.toLowerCase() && data !== "0x") {
       try {
         const d = decodeFunctionData({ abi: conclaveAbi, data });
@@ -295,7 +310,7 @@ export function ProposalDrawer({ id, onClose }: { id: string; onClose: () => voi
         <p className="text-fog">Loading…</p>
       </Drawer>
     );
-  const actions = decodeActions(p, conclave);
+  const actions = decodeActions(p, conclave, dao.data?.upgrades?.proxyAdmin);
   const need = dao.data?.threshold ?? 2;
   const canVote = p.state === "Active" && passport.isMember && passport.key.mlDsa87 && !hasVoted.data;
   const isProposer = passport.address?.toLowerCase() === p.proposer.toLowerCase();

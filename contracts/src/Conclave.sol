@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -26,7 +29,14 @@ import {QorePQC} from "./libraries/QorePQC.sol";
 ///
 ///      The worst a classical-only attacker can do is one temporary pause (`pauseDuration`, shorter
 ///      than `gracePeriod`, so queued proposals survive it), and only with the guardian's key.
-contract Conclave is IConclave, ReentrancyGuard {
+///
+///      Upgrades: Conclave runs behind an OpenZeppelin TransparentUpgradeableProxy. The proxy's
+///      ProxyAdmin is owned by the proxy itself (this contract's address), so the implementation can
+///      only be replaced by an executed proposal calling `ProxyAdmin.upgradeAndCall`: the same quorum
+///      of post-quantum votes and timelock as a payout, and blocked while paused. No classical key
+///      can upgrade. See {upgradesGovernedByDao}. State lives in one ERC-7201 namespace, so a new
+///      version may only append fields to {ConclaveStorage}.
+contract Conclave is IConclave, Initializable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ---------------------------------------------------------------------------------------------
@@ -46,40 +56,46 @@ contract Conclave is IConclave, ReentrancyGuard {
     uint64 public constant MAX_PAUSE_DURATION = 14 days;
 
     // ---------------------------------------------------------------------------------------------
-    // Immutable configuration
+    // Storage (ERC-7201 namespace: proxy-safe, and upgrades append fields without collisions)
     // ---------------------------------------------------------------------------------------------
 
-    uint64 public immutable votingPeriod;
-    uint64 public immutable timelockDelay;
-    uint64 public immutable gracePeriod;
-    uint64 public immutable pauseDuration;
-    /// @dev Native chain id QoreX puts in the signed message, e.g. `qorechain-diana`.
-    ShortString private immutable _nativeChainId;
+    /// @custom:storage-location erc7201:conclave.storage.Conclave
+    struct ConclaveStorage {
+        // Configuration, set once by initialize().
+        uint64 votingPeriod;
+        uint64 timelockDelay;
+        uint64 gracePeriod;
+        uint64 pauseDuration;
+        /// @dev Native chain id QoreX puts in the signed message, e.g. `qorechain-diana`.
+        ShortString nativeChainId;
+        /// @dev Classical key allowed to pause once. Cannot move funds or unpause.
+        address guardian;
+        /// @dev Whether the guardian may still pause. A pause uses it up; governance re-arms it.
+        bool guardianArmed;
+        /// @dev Paused while `block.timestamp < pausedUntil`.
+        uint64 pausedUntil;
+        /// @dev FOR votes a proposal needs. Always a strict majority of the members.
+        uint16 threshold;
+        /// @dev Advances on every member or threshold change; older proposals become Stale.
+        uint32 epoch;
+        uint64 proposalCount;
+        address[] members;
+        /// @dev Index in `members` plus one; zero for non-members.
+        mapping(address => uint256) memberPosition;
+        /// @dev Next nonce a member's `propose` signature must use.
+        mapping(address => uint256) proposeNonce;
+        mapping(uint256 => Proposal) proposals;
+        mapping(uint256 => mapping(address => bool)) hasVoted;
+    }
 
-    // ---------------------------------------------------------------------------------------------
-    // Storage
-    // ---------------------------------------------------------------------------------------------
+    /// @dev keccak256(abi.encode(uint256(keccak256("conclave.storage.Conclave")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant STORAGE_LOCATION = 0xcf22a987ddf3b90b0f127f6ffadabfbffe7d94a358668b9082f682336c116d00;
 
-    /// @notice Classical key allowed to pause once. Cannot move funds or unpause.
-    address public guardian;
-    /// @notice Whether the guardian may still pause. A pause uses it up; governance re-arms it.
-    bool public guardianArmed;
-    /// @notice Paused while `block.timestamp < pausedUntil`.
-    uint64 public pausedUntil;
-
-    /// @notice FOR votes a proposal needs. Always a strict majority of the members.
-    uint16 public threshold;
-    /// @notice Advances on every member or threshold change; older proposals become Stale.
-    uint32 public epoch;
-    uint64 public proposalCount;
-
-    address[] private _members;
-    /// @dev Index in `_members` plus one; zero for non-members.
-    mapping(address => uint256) private _memberPosition;
-    /// @notice Next nonce a member's `propose` signature must use.
-    mapping(address => uint256) public proposeNonce;
-    mapping(uint256 => Proposal) private _proposals;
-    mapping(uint256 => mapping(address => bool)) public hasVoted;
+    function _storage() private pure returns (ConclaveStorage storage $) {
+        assembly ("memory-safe") {
+            $.slot := STORAGE_LOCATION
+        }
+    }
 
     modifier onlySelf() {
         if (msg.sender != address(this)) revert OnlySelf();
@@ -87,21 +103,28 @@ contract Conclave is IConclave, ReentrancyGuard {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Construction
+    // Initialization (runs once, through the proxy, in the same transaction that deploys it)
     // ---------------------------------------------------------------------------------------------
+
+    /// @dev The implementation itself can never be initialized: only proxies pointing at it.
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     /// @param initialMembers Founding members. Each must already have an ML-DSA-87 key registered.
     /// @param initialThreshold FOR votes needed; must be a strict majority of `initialMembers`.
     /// @param initialGuardian Account allowed to pause once, or zero for none.
     /// @param timing Voting period, timelock, grace period and pause duration (seconds).
     /// @param nativeChainId_ Native chain id QoreX signs with, e.g. `qorechain-diana`.
-    constructor(
+    function initialize(
         address[] memory initialMembers,
         uint16 initialThreshold,
         address initialGuardian,
         Timing memory timing,
         string memory nativeChainId_
-    ) {
+    ) external initializer {
+        ConclaveStorage storage $ = _storage();
         if (
             timing.votingPeriod < MIN_VOTING_PERIOD || timing.votingPeriod > MAX_VOTING_PERIOD
                 || timing.timelockDelay < MIN_TIMELOCK_DELAY || timing.timelockDelay > MAX_TIMELOCK_DELAY
@@ -109,24 +132,24 @@ contract Conclave is IConclave, ReentrancyGuard {
                 || timing.pauseDuration < MIN_PAUSE_DURATION || timing.pauseDuration > MAX_PAUSE_DURATION
                 || timing.gracePeriod <= timing.pauseDuration
         ) revert InvalidTiming();
-        votingPeriod = timing.votingPeriod;
-        timelockDelay = timing.timelockDelay;
-        gracePeriod = timing.gracePeriod;
-        pauseDuration = timing.pauseDuration;
-        _nativeChainId = _toNativeChainId(nativeChainId_);
+        $.votingPeriod = timing.votingPeriod;
+        $.timelockDelay = timing.timelockDelay;
+        $.gracePeriod = timing.gracePeriod;
+        $.pauseDuration = timing.pauseDuration;
+        $.nativeChainId = _toNativeChainId(nativeChainId_);
 
         uint256 count = initialMembers.length;
         if (count == 0 || count > MAX_MEMBERS) revert InvalidMemberCount(count);
         for (uint256 i; i < count; ++i) {
             _addMember(initialMembers[i]);
         }
-        threshold = initialThreshold;
+        $.threshold = initialThreshold;
         emit ThresholdChanged(initialThreshold);
         _checkConfig();
 
         if (initialGuardian != address(0)) {
-            guardian = initialGuardian;
-            guardianArmed = true;
+            $.guardian = initialGuardian;
+            $.guardianArmed = true;
             emit GuardianChanged(initialGuardian);
         }
     }
@@ -151,22 +174,24 @@ contract Conclave is IConclave, ReentrancyGuard {
         uint256 deadline,
         bytes calldata signature
     ) external nonReentrant returns (uint256 proposalId) {
+        ConclaveStorage storage $ = _storage();
         if (!isMember(proposer)) revert NotMember(proposer);
         if (block.timestamp > deadline) revert SignatureExpired(deadline);
         _validateActions(targets, values, calldatas);
 
         bytes32 proposalHash = hashProposal(targets, values, calldatas, keccak256(bytes(description)));
-        uint256 nonce = proposeNonce[proposer];
+        uint256 nonce = $.proposeNonce[proposer];
         _verify(proposer, ConclaveMessages.propose(address(this), proposer, nonce, deadline, proposalHash), signature);
-        proposeNonce[proposer] = nonce + 1;
+        $.proposeNonce[proposer] = nonce + 1;
 
-        proposalId = ++proposalCount;
-        uint64 voteEnd = uint64(block.timestamp) + votingPeriod;
-        _proposals[proposalId] = Proposal({
+        proposalId = ++$.proposalCount;
+        uint64 voteEnd = uint64(block.timestamp) + $.votingPeriod;
+        uint32 currentEpoch = $.epoch;
+        $.proposals[proposalId] = Proposal({
             proposalHash: proposalHash,
             proposer: proposer,
             voteEnd: voteEnd,
-            epoch: epoch,
+            epoch: currentEpoch,
             eta: 0,
             forVotes: 0,
             againstVotes: 0,
@@ -174,7 +199,7 @@ contract Conclave is IConclave, ReentrancyGuard {
             canceled: false
         });
         emit ProposalCreated(
-            proposalId, proposer, proposalHash, targets, values, calldatas, description, voteEnd, epoch
+            proposalId, proposer, proposalHash, targets, values, calldatas, description, voteEnd, currentEpoch
         );
     }
 
@@ -197,8 +222,9 @@ contract Conclave is IConclave, ReentrancyGuard {
         if (count == 0 || choices.length != count || signatures.length != count) revert LengthMismatch();
         _requireState(proposalId, ProposalState.Active);
 
+        mapping(address => bool) storage voted = _storage().hasVoted[proposalId];
         for (uint256 i; i < count; ++i) {
-            if (hasVoted[proposalId][voters[i]]) continue;
+            if (voted[voters[i]]) continue;
             _castVote(proposalId, voters[i], choices[i], signatures[i]);
             ++counted;
             if (state(proposalId) != ProposalState.Active) break;
@@ -211,7 +237,7 @@ contract Conclave is IConclave, ReentrancyGuard {
         if (current != ProposalState.Active && current != ProposalState.Queued && current != ProposalState.Ready) {
             revert UnexpectedState(proposalId, current);
         }
-        Proposal storage p = _proposals[proposalId];
+        Proposal storage p = _storage().proposals[proposalId];
         address proposer = p.proposer;
         _verify(proposer, ConclaveMessages.cancel(address(this), proposer, proposalId, p.proposalHash), signature);
         p.canceled = true;
@@ -233,7 +259,8 @@ contract Conclave is IConclave, ReentrancyGuard {
         bytes32 descriptionHash
     ) external nonReentrant {
         _requireState(proposalId, ProposalState.Ready);
-        Proposal storage p = _proposals[proposalId];
+        ConclaveStorage storage $ = _storage();
+        Proposal storage p = $.proposals[proposalId];
         if (hashProposal(targets, values, calldatas, descriptionHash) != p.proposalHash) {
             revert ProposalHashMismatch();
         }
@@ -246,12 +273,12 @@ contract Conclave is IConclave, ReentrancyGuard {
         }
 
         p.executed = true;
-        uint32 epochBefore = epoch;
+        uint32 epochBefore = $.epoch;
         for (uint256 i; i < count; ++i) {
             _call(targets[i], values[i], calldatas[i], i);
         }
         // Member and threshold changes are validated once, after all actions, so their order does not matter.
-        if (epoch != epochBefore) _checkConfig();
+        if ($.epoch != epochBefore) _checkConfig();
         emit ProposalExecuted(proposalId);
     }
 
@@ -263,11 +290,12 @@ contract Conclave is IConclave, ReentrancyGuard {
     /// @dev The only action a classical key can take. It cannot move funds or unpause, and since
     ///      `pauseDuration < gracePeriod` a queued proposal can still be executed after the pause.
     function pause() external nonReentrant {
-        if (msg.sender != guardian) revert NotGuardian();
-        if (!guardianArmed) revert GuardianDisarmed();
-        guardianArmed = false;
-        uint64 until = uint64(block.timestamp) + pauseDuration;
-        pausedUntil = until;
+        ConclaveStorage storage $ = _storage();
+        if (msg.sender != $.guardian) revert NotGuardian();
+        if (!$.guardianArmed) revert GuardianDisarmed();
+        $.guardianArmed = false;
+        uint64 until = uint64(block.timestamp) + $.pauseDuration;
+        $.pausedUntil = until;
         emit Paused(msg.sender, until);
     }
 
@@ -283,37 +311,39 @@ contract Conclave is IConclave, ReentrancyGuard {
 
     /// @notice Removes a member.
     function removeMember(address account) external onlySelf {
-        uint256 position = _memberPosition[account];
+        ConclaveStorage storage $ = _storage();
+        uint256 position = $.memberPosition[account];
         if (position == 0) revert NotMember(account);
-        uint256 last = _members.length;
+        uint256 last = $.members.length;
         if (position != last) {
-            address moved = _members[last - 1];
-            _members[position - 1] = moved;
-            _memberPosition[moved] = position;
+            address moved = $.members[last - 1];
+            $.members[position - 1] = moved;
+            $.memberPosition[moved] = position;
         }
-        _members.pop();
-        delete _memberPosition[account];
+        $.members.pop();
+        delete $.memberPosition[account];
         emit MemberRemoved(account);
         _advanceEpoch();
     }
 
     /// @notice Changes the number of FOR votes a proposal needs.
     function setThreshold(uint16 newThreshold) external onlySelf {
-        threshold = newThreshold;
+        _storage().threshold = newThreshold;
         emit ThresholdChanged(newThreshold);
         _advanceEpoch();
     }
 
     /// @notice Sets (and arms) the guardian, or removes it with the zero address.
     function setGuardian(address newGuardian) external onlySelf {
-        guardian = newGuardian;
-        guardianArmed = newGuardian != address(0);
+        ConclaveStorage storage $ = _storage();
+        $.guardian = newGuardian;
+        $.guardianArmed = newGuardian != address(0);
         emit GuardianChanged(newGuardian);
     }
 
     /// @notice Ends a pause early.
     function unpause() external onlySelf {
-        pausedUntil = 0;
+        _storage().pausedUntil = 0;
         emit Unpaused();
     }
 
@@ -330,49 +360,135 @@ contract Conclave is IConclave, ReentrancyGuard {
 
     /// @notice Current state of a proposal.
     function state(uint256 proposalId) public view returns (ProposalState) {
-        if (proposalId == 0 || proposalId > proposalCount) return ProposalState.Unknown;
-        Proposal storage p = _proposals[proposalId];
+        ConclaveStorage storage $ = _storage();
+        if (proposalId == 0 || proposalId > $.proposalCount) return ProposalState.Unknown;
+        Proposal storage p = $.proposals[proposalId];
         if (p.executed) return ProposalState.Executed;
         if (p.canceled) return ProposalState.Canceled;
-        if (p.epoch != epoch) return ProposalState.Stale;
+        if (p.epoch != $.epoch) return ProposalState.Stale;
 
         uint64 eta = p.eta;
         if (eta == 0) {
             if (block.timestamp > p.voteEnd) return ProposalState.Defeated;
             // Once more members voted against than may stay away, the threshold is out of reach.
-            uint256 memberTotal = _members.length;
-            uint256 needed = threshold;
+            uint256 memberTotal = $.members.length;
+            uint256 needed = $.threshold;
             if (needed > memberTotal || p.againstVotes > memberTotal - needed) return ProposalState.Defeated;
             return ProposalState.Active;
         }
         if (block.timestamp < eta) return ProposalState.Queued;
-        if (block.timestamp > uint256(eta) + gracePeriod) return ProposalState.Expired;
+        if (block.timestamp > uint256(eta) + $.gracePeriod) return ProposalState.Expired;
         return ProposalState.Ready;
     }
 
     function getProposal(uint256 proposalId) external view returns (Proposal memory) {
-        return _proposals[proposalId];
+        return _storage().proposals[proposalId];
     }
 
     function isMember(address account) public view returns (bool) {
-        return _memberPosition[account] != 0;
+        return _storage().memberPosition[account] != 0;
     }
 
     function members() external view returns (address[] memory) {
-        return _members;
+        return _storage().members;
     }
 
     function memberCount() external view returns (uint256) {
-        return _members.length;
+        return _storage().members.length;
     }
 
     function isPaused() public view returns (bool) {
-        return block.timestamp < pausedUntil;
+        return block.timestamp < _storage().pausedUntil;
     }
 
     /// @notice Native chain id the signed messages are bound to (e.g. `qorechain-diana`).
     function nativeChainId() public view returns (string memory) {
-        return ShortStrings.toString(_nativeChainId);
+        return ShortStrings.toString(_storage().nativeChainId);
+    }
+
+    function votingPeriod() external view returns (uint64) {
+        return _storage().votingPeriod;
+    }
+
+    function timelockDelay() external view returns (uint64) {
+        return _storage().timelockDelay;
+    }
+
+    function gracePeriod() external view returns (uint64) {
+        return _storage().gracePeriod;
+    }
+
+    function pauseDuration() external view returns (uint64) {
+        return _storage().pauseDuration;
+    }
+
+    /// @notice Classical key allowed to pause once. Cannot move funds or unpause.
+    function guardian() external view returns (address) {
+        return _storage().guardian;
+    }
+
+    /// @notice Whether the guardian may still pause. A pause uses it up; governance re-arms it.
+    function guardianArmed() external view returns (bool) {
+        return _storage().guardianArmed;
+    }
+
+    /// @notice Paused while `block.timestamp < pausedUntil`.
+    function pausedUntil() external view returns (uint64) {
+        return _storage().pausedUntil;
+    }
+
+    /// @notice FOR votes a proposal needs. Always a strict majority of the members.
+    function threshold() external view returns (uint16) {
+        return _storage().threshold;
+    }
+
+    /// @notice Advances on every member or threshold change; older proposals become Stale.
+    function epoch() external view returns (uint32) {
+        return _storage().epoch;
+    }
+
+    function proposalCount() external view returns (uint64) {
+        return _storage().proposalCount;
+    }
+
+    /// @notice Next nonce a member's `propose` signature must use.
+    function proposeNonce(address member) external view returns (uint256) {
+        return _storage().proposeNonce[member];
+    }
+
+    function hasVoted(uint256 proposalId, address member) external view returns (bool) {
+        return _storage().hasVoted[proposalId][member];
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Upgrades (TransparentUpgradeableProxy, ERC-1967)
+    // ---------------------------------------------------------------------------------------------
+
+    /// @notice Version of the implementation this proxy runs. Each upgrade bumps it.
+    function version() external pure virtual returns (string memory) {
+        return "1.0.0";
+    }
+
+    /// @notice The implementation contract this proxy currently runs.
+    function implementation() external view returns (address) {
+        return ERC1967Utils.getImplementation();
+    }
+
+    /// @notice The ProxyAdmin that may upgrade this proxy.
+    function proxyAdmin() public view returns (address) {
+        return ERC1967Utils.getAdmin();
+    }
+
+    /// @notice True when only an executed proposal can upgrade Conclave: its ProxyAdmin is owned by
+    ///         this contract, so no externally owned (classical) key can replace the implementation.
+    function upgradesGovernedByDao() external view returns (bool) {
+        address admin = proxyAdmin();
+        if (admin.code.length == 0) return false;
+        try Ownable(admin).owner() returns (address owner) {
+            return owner == address(this);
+        } catch {
+            return false;
+        }
     }
 
     /// @notice Commitment to a proposal's exact content.
@@ -391,7 +507,9 @@ contract Conclave is IConclave, ReentrancyGuard {
         view
         returns (string memory)
     {
-        return string(ConclaveMessages.propose(address(this), member, proposeNonce[member], deadline, proposalHash));
+        return string(
+            ConclaveMessages.propose(address(this), member, _storage().proposeNonce[member], deadline, proposalHash)
+        );
     }
 
     /// @notice Message `member` must sign to vote on `proposalId`.
@@ -416,11 +534,12 @@ contract Conclave is IConclave, ReentrancyGuard {
     // ---------------------------------------------------------------------------------------------
 
     function _castVote(uint256 proposalId, address voter, bool support, bytes calldata signature) private {
+        ConclaveStorage storage $ = _storage();
         if (!isMember(voter)) revert NotMember(voter);
-        if (hasVoted[proposalId][voter]) revert AlreadyVoted(proposalId, voter);
-        Proposal storage p = _proposals[proposalId];
+        if ($.hasVoted[proposalId][voter]) revert AlreadyVoted(proposalId, voter);
+        Proposal storage p = $.proposals[proposalId];
         _verify(voter, ConclaveMessages.vote(address(this), voter, proposalId, p.proposalHash, support), signature);
-        hasVoted[proposalId][voter] = true;
+        $.hasVoted[proposalId][voter] = true;
 
         uint16 forVotes = p.forVotes;
         uint16 againstVotes = p.againstVotes;
@@ -431,8 +550,8 @@ contract Conclave is IConclave, ReentrancyGuard {
         }
         emit VoteCast(proposalId, voter, support, forVotes, againstVotes);
 
-        if (support && forVotes >= threshold) {
-            uint64 eta = uint64(block.timestamp) + timelockDelay;
+        if (support && forVotes >= $.threshold) {
+            uint64 eta = uint64(block.timestamp) + $.timelockDelay;
             p.eta = eta;
             emit ProposalQueued(proposalId, eta);
         }
@@ -463,27 +582,30 @@ contract Conclave is IConclave, ReentrancyGuard {
     }
 
     function _addMember(address account) private {
+        ConclaveStorage storage $ = _storage();
         if (account == address(0)) revert ZeroAddress();
-        if (_memberPosition[account] != 0) revert AlreadyMember(account);
-        if (_members.length >= MAX_MEMBERS) revert InvalidMemberCount(_members.length + 1);
+        if ($.memberPosition[account] != 0) revert AlreadyMember(account);
+        if ($.members.length >= MAX_MEMBERS) revert InvalidMemberCount($.members.length + 1);
         // Reverts unless the account has an ML-DSA-87 key on chain: a member who cannot sign could
         // otherwise make the threshold unreachable.
         QorePQC.keyOf(account);
-        _members.push(account);
-        _memberPosition[account] = _members.length;
+        $.members.push(account);
+        $.memberPosition[account] = $.members.length;
         emit MemberAdded(account);
     }
 
     function _advanceEpoch() private {
-        uint32 next = epoch + 1;
-        epoch = next;
+        ConclaveStorage storage $ = _storage();
+        uint32 next = $.epoch + 1;
+        $.epoch = next;
         emit EpochAdvanced(next);
     }
 
     /// @dev At least one member and a threshold that is a strict majority of them.
     function _checkConfig() private view {
-        uint256 memberTotal = _members.length;
-        uint256 needed = threshold;
+        ConclaveStorage storage $ = _storage();
+        uint256 memberTotal = $.members.length;
+        uint256 needed = $.threshold;
         if (memberTotal == 0) revert InvalidMemberCount(0);
         if (needed == 0 || needed > memberTotal || needed * 2 <= memberTotal) {
             revert InvalidThreshold(needed, memberTotal);
@@ -518,8 +640,9 @@ contract Conclave is IConclave, ReentrancyGuard {
     }
 
     function _existingProposal(uint256 proposalId) private view returns (Proposal storage p) {
-        if (proposalId == 0 || proposalId > proposalCount) revert UnexpectedState(proposalId, ProposalState.Unknown);
-        return _proposals[proposalId];
+        ConclaveStorage storage $ = _storage();
+        if (proposalId == 0 || proposalId > $.proposalCount) revert UnexpectedState(proposalId, ProposalState.Unknown);
+        return $.proposals[proposalId];
     }
 
     /// @dev Same rule as QoreSign's chain id check (`^[A-Za-z0-9._-]+$`), so `|` cannot appear in it.

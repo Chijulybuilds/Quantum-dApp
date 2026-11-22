@@ -43,7 +43,7 @@ finding, then a second run. Both reports are kept in [`docs/audit/`](audit/).
 | Call | In | Protects |
 |---|---|---|
 | `pqcKeyStatus` (0x…0a02) | `QorePQC.keyOf`, from `QorePQC.verify` | Reads the signer's registered ML-DSA-87 key; requires algorithm 1 and 2,592 bytes |
-| `pqcKeyStatus` | `Conclave._addMember` (constructor and `addMember`) | No member without a usable key, so the threshold stays reachable |
+| `pqcKeyStatus` | `Conclave._addMember` (`initialize` and `addMember`) | No member without a usable key, so the threshold stays reachable |
 | `pqcVerify` (0x…0a01) | `QorePQC.accepts`, from `QorePQC.verify` | Proves the signer approved the exact message |
 | `QorePQC.verify` | `Conclave.propose` | Who may create a proposal, and its exact content |
 | `QorePQC.verify` | `Conclave._castVote` (`castVote`, `castVotes`) | Every vote; reaching the threshold queues the payout |

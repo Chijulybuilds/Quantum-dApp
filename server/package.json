@@ -13,6 +13,8 @@
     "start": "tsx --env-file=.env src/index.ts",
     "presetup:testnet": "node -e \"require('fs').existsSync('.env')||(console.error('No server/.env yet. Run: npm run keys'),process.exit(1))\"",
     "setup:testnet": "tsx --env-file=.env src/setup.ts",
+    "preredeploy:testnet": "node -e \"require('fs').existsSync('.env')||(console.error('No server/.env yet. Run: npm run keys'),process.exit(1))\"",
+    "redeploy:testnet": "tsx --env-file=.env src/setup.ts --redeploy",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

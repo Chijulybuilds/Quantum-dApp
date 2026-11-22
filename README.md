@@ -32,6 +32,7 @@ member registered on chain (read with **`pqcKeyStatus`**, never supplied by the 
 | Execute a passed proposal | Anyone, after the timelock | The proposal's majority of PQ votes |
 | Add/remove members, change threshold or guardian, unpause, pay tokens | The DAO itself | An executed proposal |
 | Pause payouts **once**, for at most `pauseDuration` | The guardian | Classical key (the only one) |
+| Upgrade the contract's implementation | The DAO itself | An executed proposal (it owns its ProxyAdmin) |
 
 Members sign in **QoreX** without paying gas, and the wallet shows them a plain-text message such as:
 
@@ -51,6 +52,12 @@ leaked relayer key can only submit signatures members already made, and only to 
 
 **The worst a stolen classical key can do is one temporary pause.** It can never vote, approve,
 withdraw or unpause, and a queued payout survives the pause because the grace period is longer.
+
+**Upgradeable, without an upgrade key.** Conclave runs behind an OpenZeppelin
+`TransparentUpgradeableProxy`, so its logic can be improved later at the same address, with the
+same treasury and history. The proxy's `ProxyAdmin` is owned by Conclave itself: an upgrade is a
+proposal like any other, needing the post-quantum majority and the timelock, and blocked while
+paused. There is no classical key that could swap the code. See [Upgrading](#upgrading).
 
 ## The full stack
 
@@ -85,7 +92,7 @@ an open window) can also execute directly through wagmi.
 | **pqcKeyStatus** | [`QorePQC.sol`](contracts/src/libraries/QorePQC.sol) `keyOf`: signer keys and new members | Done. Checked against the live precompile |
 | **Scoped EVM window** | [`scripts/window.ts`](contracts/scripts/window.ts) `open-scoped`: relayer window limited to the Conclave address | Done. Testnet evidence: [docs/EVIDENCE.md](docs/EVIDENCE.md) |
 | **Two-stage QCAI audit** | [docs/AUDIT.md](docs/AUDIT.md), reports in [docs/audit/](docs/audit/) | Workbook ready; stages 1 and 2 to run |
-| **Foundry tests** | [`contracts/test/`](contracts/test), [`contracts/test-ffi/`](contracts/test-ffi) | 133 unit, fuzz and invariant tests + 4 differential tests |
+| **Foundry tests** | [`contracts/test/`](contracts/test), [`contracts/test-ffi/`](contracts/test-ffi) | 146 unit, fuzz and invariant tests + 4 differential tests |
 
 ## Verified on the live testnet
 
@@ -101,16 +108,23 @@ PASS  pqcVerify rejects another key
 PASS  QorePQC.accepts (Solidity) accepts a valid signature on chain
 PASS  QorePQC.accepts (Solidity) rejects a changed message on chain
 PASS  QorePQC.keyOf (Solidity) decodes the registered key on chain
+PASS  ConclaveProxy deploys with a ProxyAdmin owned by the proxy (as Conclave's is)
+PASS  pqcVerify behind ConclaveProxy (DELEGATECALL): valid signature accepted
+PASS  pqcVerify behind ConclaveProxy (DELEGATECALL): changed message rejected
+PASS  pqcKeyStatus behind ConclaveProxy, in its constructor's init call and after
 ```
 
-The last three run Conclave's own Solidity code against the real precompiles, inside an `eth_call`
-of creation code ([`script/LivePqcProbe.sol`](contracts/script/LivePqcProbe.sol)).
+The last seven run Conclave's own Solidity code against the real precompiles, directly and behind a
+real `ConclaveProxy` (the `DELEGATECALL` frames Conclave runs in), inside an `eth_call` of creation
+code ([`script/LivePqcProbe.sol`](contracts/script/LivePqcProbe.sol),
+[`script/LiveProxyProbe.sol`](contracts/script/LiveProxyProbe.sol)).
 
 ## Testing
 
 | Suite | What it proves |
 |---|---|
-| `Conclave.Deploy` | Constructor validation: members, keys, majority threshold, timing, chain id |
+| `Conclave.Deploy` | Initializer validation through the proxy: members, keys, majority threshold, timing, chain id |
+| `Conclave.Upgrade` | Only an executed proposal upgrades (fuzzed callers); state survives; blocked while paused; no re-initialization; ERC-7201 layout pinned; the DAO can freeze upgrades |
 | `Conclave.Proposals` | PQ-signed proposals and cancellation; nonce, deadline, content binding |
 | `Conclave.Voting` | Vote binding to proposal, support, member, DAO, EVM chain and native chain; key rotation and revocation; batch relay |
 | `Conclave.Execution` | Timelock, grace period, content hash, all-or-nothing actions, revert bubbling, re-entrancy |
@@ -122,13 +136,13 @@ of creation code ([`script/LivePqcProbe.sol`](contracts/script/LivePqcProbe.sol)
 | `invariant/` | 256 runs × 64 random honest and attacker calls: treasury accounting, attacker never paid, no forged success, majority always valid |
 | `test-ffi/` | The bytes the contract verifies are exactly what **QoreSign** (the library QoreX uses) signs; a real ML-DSA-87 signature verifies over them |
 
-Coverage: 100% of functions, about 95% of lines and branches. The relayer has its own tests
+Coverage: 100% of functions, about 95% of lines and 93% of branches. The relayer has its own tests
 (`server/test/`): real ML-DSA-87 signatures accepted and rejected the same way the contract does,
 and request validation.
 
 ```bash
 cd contracts
-forge build --sizes   # Conclave: 13.4 KB of 24 KB
+forge build --sizes   # Conclave: 17.5 KB of 24 KB (implementation), ConclaveProxy 1.0 KB
 forge test            # unit + fuzz + invariant
 npm ci && npm run test:ffi
 ```
@@ -168,13 +182,31 @@ The app can also be published alone to GitHub Pages by [`pages.yml`](.github/wor
 public HTTPS address, so test the mobile wallet on the published app.
 
 `forge script` cannot deploy Conclave: Foundry's local EVM has no QoreChain precompiles, so the
-constructor's key checks would fail in simulation. `server/src/setup.ts` and
+initializer's key checks would fail in simulation. `server/src/setup.ts` and
 `contracts/scripts/deploy.ts` send the deployment straight to the chain instead.
+
+## Upgrading
+
+Conclave is deployed as an implementation behind `ConclaveProxy` (an unmodified OpenZeppelin 5.7
+`TransparentUpgradeableProxy`). Everyone uses the proxy address; it never changes. To ship a new
+version:
+
+1. Write it as a contract that keeps `Conclave`'s storage (one ERC-7201 namespace: only append
+   fields) and bumps `version()`. A one-time migration goes in a `reinitializer(n)` function, not
+   marked `nonReentrant` (it runs inside `execute`).
+2. `forge build`, then `npm run window open` and `npm run conclave deploy-implementation`.
+3. `npm run conclave propose-upgrade <implementation> "Upgrade to v2"` (add `--call <0x…>` for the
+   migration). The app shows it as **Upgrade · implementation → 0x…**.
+4. Members vote as for any proposal; after the timelock anyone executes it. `npm run conclave
+   upgrade-info` shows the running version.
+
+The DAO can also renounce the ProxyAdmin by proposal, which freezes the code for good.
 
 ## Repository
 
 ```text
-contracts/src/Conclave.sol                 the DAO treasury
+contracts/src/Conclave.sol                 the DAO treasury (implementation)
+contracts/src/ConclaveProxy.sol            the address everyone uses: OpenZeppelin TransparentUpgradeableProxy
 contracts/src/libraries/QorePQC.sol        fail-closed pqcVerify / pqcKeyStatus wrappers
 contracts/src/libraries/ConclaveMessages.sol  the messages members sign
 contracts/test/                            Foundry unit, fuzz and invariant tests

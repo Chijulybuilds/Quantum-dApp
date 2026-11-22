@@ -43,6 +43,8 @@ npm run setup:testnet   # deploys Conclave and writes contracts/deployments/test
    `{"ok":true,"deployed":true,…}`, then open the app and connect QoreX.
 
 Changing an environment variable takes effect on the next deployment (**Deployments → ⋯ → Redeploy**).
+After deploying a new Conclave (`npm run redeploy:testnet`), update `CONCLAVE_ADDRESS` and
+`CONCLAVE_DEPLOY_BLOCK` there. Upgrading Conclave does not: the proxy address stays the same.
 
 ## Good to know
 

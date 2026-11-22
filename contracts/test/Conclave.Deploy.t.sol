@@ -142,7 +142,7 @@ contract ConclaveDeployTest is ConclaveTestBase {
         bad[7].pauseDuration = GRACE; // the grace period must outlast a pause
         for (uint256 i; i < bad.length; ++i) {
             vm.expectRevert(IConclave.InvalidTiming.selector);
-            new Conclave(_founders(), 2, guardian, bad[i], NATIVE_CHAIN_ID);
+            _deployWith(_founders(), 2, guardian, bad[i], NATIVE_CHAIN_ID);
         }
     }
 
@@ -151,12 +151,12 @@ contract ConclaveDeployTest is ConclaveTestBase {
             ["", "qorechain|diana", "qorechain diana", "qorechain-diana-0123456789-abcdef", "diana\n"];
         for (uint256 i; i < bad.length; ++i) {
             vm.expectRevert(IConclave.InvalidChainId.selector);
-            new Conclave(_founders(), 2, guardian, _timing(), bad[i]);
+            _deployWith(_founders(), 2, guardian, _timing(), bad[i]);
         }
     }
 
     function test_AcceptsMainnetChainId() public {
-        Conclave c = new Conclave(_founders(), 2, guardian, _timing(), "qorechain-vladi");
+        Conclave c = _deployWith(_founders(), 2, guardian, _timing(), "qorechain-vladi");
         assertEq(c.nativeChainId(), "qorechain-vladi");
     }
 }

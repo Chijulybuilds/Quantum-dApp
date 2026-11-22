@@ -6,7 +6,8 @@
  *   npm run pqc:check                 precompile checks
  *   npm run pqc:check -- <0x|qor1>    also show that account's registered key
  *
- * It also runs Conclave's Solidity wrappers (QorePQC) against the live precompiles, and with
+ * It also runs Conclave's Solidity wrappers (QorePQC) against the live precompiles, directly and
+ * behind a real ConclaveProxy (the DELEGATECALL frames Conclave runs in), and with
  * CONCLAVE_ADDRESS set checks that the deployed contract builds the same bytes as QoreSign.
  */
 import { randomBytes } from "node:crypto";
@@ -118,7 +119,28 @@ async function main(): Promise<void> {
     );
   }
 
-  // 5. Optional: the deployed contract builds the same bytes as QoreSign.
+  // 5. Behind ConclaveProxy: every Conclave call, and initialize, runs in a DELEGATECALL frame.
+  const proxyProbe = artifact("LiveProxyProbe");
+  const proxyResult = await pub.call({
+    data: encodeDeployData({
+      abi: proxyProbe.abi,
+      bytecode: proxyProbe.bytecode,
+      args: [toHex(key.publicKey), toHex(signed), toHex(tampered), toHex(signature), registeredAccount],
+    }),
+  });
+  const [deployed, adminOwnedByProxy, validViaProxy, tamperedViaProxy, keyViaProxy] = decodeAbiParameters(
+    parseAbiParameters("bool, bool, bool, bool, uint256"),
+    proxyResult.data ?? "0x",
+  );
+  console.log("");
+  check("ConclaveProxy deploys with a ProxyAdmin owned by the proxy (as Conclave's is)", deployed && adminOwnedByProxy);
+  check("pqcVerify behind ConclaveProxy (DELEGATECALL): valid signature accepted", validViaProxy);
+  check("pqcVerify behind ConclaveProxy (DELEGATECALL): changed message rejected", !tamperedViaProxy);
+  if (registeredKey) {
+    check("pqcKeyStatus behind ConclaveProxy, in its constructor's init call and after", keyViaProxy === 2592n);
+  }
+
+  // 6. Optional: the deployed contract builds the same bytes as QoreSign.
   const dao = process.env.CONCLAVE_ADDRESS?.trim();
   if (dao) {
     const { abi } = conclaveArtifact();

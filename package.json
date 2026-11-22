@@ -13,6 +13,8 @@
     "keys": "npm --prefix server run keys",
     "presetup:testnet": "node scripts/check-install.mjs",
     "setup:testnet": "npm --prefix server run setup:testnet",
+    "preredeploy:testnet": "node scripts/check-install.mjs",
+    "redeploy:testnet": "npm --prefix server run redeploy:testnet",
     "predev": "node scripts/check-install.mjs",
     "dev": "concurrently --kill-others-on-fail -n relayer,app -c magenta,cyan \"npm --prefix server run dev\" \"npm --prefix app run dev\"",
     "predev:app": "node scripts/check-install.mjs",
