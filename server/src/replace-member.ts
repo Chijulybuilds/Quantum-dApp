@@ -14,7 +14,9 @@ import { toEvmAddress } from "@qorechain/evm";
 import { encodeFunctionData, getAddress, isAddress, keccak256, toBytes, type Address, type Hex } from "viem";
 
 import { conclaveAbi } from "./abi.js";
-import { account, keyStatus, txUrl } from "./chain.js";
+import { toQorAddress } from "@qorechain/evm";
+
+import { account, accountKind, keyStatus, txUrl } from "./chain.js";
 import { config, requireDeployment } from "./config.js";
 import { STATES, read } from "./indexer.js";
 import { ensureScopedWindow } from "./keeper.js";
@@ -79,6 +81,13 @@ async function main(): Promise<void> {
   if (members.some((m) => same(m, newMember))) throw new Error(`${newMember} is already a member`);
   if (!(await keyStatus(newMember)).isMlDsa87) {
     throw new Error(`${newMember} has no ML-DSA-87 key on chain yet: register it first (QoreX, or npm run window register)`);
+  }
+  if ((await accountKind(toQorAddress(newMember))) === "ethereum" && !args.includes("--allow-ethereum-account")) {
+    throw new Error(
+      `${newMember} is an Ethereum-type account (imported from MetaMask or similar). QoreX cannot sign Conclave ` +
+        "messages with it, so it could never vote from QoreX. Use an account created in QoreX " +
+        "(or pass --allow-ethereum-account if this member will sign with npm run sign-message).",
+    );
   }
   const voting = voters.filter((v) => members.some((m) => same(m, v)) && !same(v, oldMember));
   if (voting.length < threshold) {

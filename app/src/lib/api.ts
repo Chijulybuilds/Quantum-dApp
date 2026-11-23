@@ -124,6 +124,8 @@ export const api = {
   proposal: (id: string) => request<Proposal>(`/api/proposals/${id}`),
   activity: () => request<Activity[]>("/api/activity"),
   relayer: () => request<Relayer>("/api/relayer"),
+  keyInfo: (address: Address) =>
+    request<{ address: Address; mlDsa87: boolean; accountType: "cosmos" | "ethereum" | "unknown" }>(`/api/keys/${address}`),
   proposeMessage: (p: { proposer: Address; targets: Address[]; values: string[]; calldatas: Hex[]; description: string; deadline: string }) =>
     post<{ message: string }>("/api/messages/propose", p),
   relayPropose: (p: { proposer: Address; targets: Address[]; values: string[]; calldatas: Hex[]; description: string; deadline: string; signature: string }) =>

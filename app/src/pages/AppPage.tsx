@@ -84,6 +84,12 @@ function heroCopy(p: ReturnType<typeof usePassport>, members: number, threshold:
       title: "Reading your passport…",
       text: "Looking up your ML-DSA-87 key on QoreChain and your seat in Conclave.",
     };
+  if (p.accountKind === "ethereum")
+    return {
+      eyebrow: p.isMember ? "Member · imported account" : "Imported account",
+      title: "QoreX can't sign with this account.",
+      text: "It came from an Ethereum wallet such as MetaMask, and QoreX signs post-quantum messages only with accounts created in QoreX. Create one in QoreX and have it added as a member.",
+    };
   if (!p.key.mlDsa87)
     return {
       eyebrow: "Classical account",

@@ -7,7 +7,7 @@ import { useReadContract, useWriteContract } from "wagmi";
 import { rise, trackPointer } from "../../components/live/motion";
 import { SealConnect } from "../../components/SealConnect";
 import { SealedCheck, SignAction } from "../../components/SignAction";
-import { useConclaveAddress, useDao, useHealth, usePassport, useProposals, useRefreshAll, useRelayer } from "../../hooks/useConclave";
+import { useAccountKind, useConclaveAddress, useDao, useHealth, usePassport, useProposals, useRefreshAll, useRelayer } from "../../hooks/useConclave";
 import { useNow } from "../../hooks/useNow";
 import { conclaveAbi, proxyAdminAbi } from "../../lib/abi";
 import { api, type Proposal } from "../../lib/api";
@@ -570,6 +570,7 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
   const candidateHasKey = registered && algorithmId === 1 && (pubkey.length - 2) / 2 === 2592;
   const candidateIsMember = members.some((m) => same(m.address, candidate));
   const candidateIsRelayer = same(candidate, relayer.data?.address);
+  const candidateKind = useAccountKind(candidate);
 
   /** The actions this proposal will run, or why it cannot be proposed yet. */
   const plan = useMemo((): { actions?: Actions; summary?: string } => {
@@ -585,7 +586,7 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
     const count = kind === "add" ? members.length + 1 : members.length - 1;
     const target = kind === "add" ? candidate : removing;
     if (!target || count < 1) return {};
-    if (kind === "add" && (candidateIsMember || !candidateHasKey)) return {};
+    if (kind === "add" && (candidateIsMember || !candidateHasKey || candidateKind === "ethereum")) return {};
     const next = thresholdFor(current, count);
     const calldatas: Hex[] = [
       kind === "add"
@@ -604,7 +605,7 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
         description: description.trim() || `${kind === "add" ? "Add" : "Remove"} member ${target} (${summary})`,
       },
     };
-  }, [kind, to, amount, description, conclave, members, current, candidate, removing, candidateIsMember, candidateHasKey]);
+  }, [kind, to, amount, description, conclave, members, current, candidate, removing, candidateIsMember, candidateHasKey, candidateKind]);
 
   const prepare = async () => {
     setError(undefined);
@@ -692,8 +693,13 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
                     No ML-DSA-87 key registered for this account yet. Its owner must register one first (QoreX does it), because a member who
                     cannot sign could block every vote.
                   </p>
+                ) : candidateKind === "ethereum" ? (
+                  <p className="text-ember">
+                    This account was imported from an Ethereum wallet (such as MetaMask). QoreX can't sign Conclave messages with it, so
+                    as a member it could never vote. Add an account created in QoreX instead.
+                  </p>
                 ) : (
-                  <p className="text-mint">ML-DSA-87 key registered ✓</p>
+                  <p className="text-mint">ML-DSA-87 key registered ✓{candidateKind === "cosmos" ? " · QoreX account ✓" : ""}</p>
                 )}
                 {candidateIsRelayer && (
                   <p className="mt-2 rounded-xl border border-ember/40 bg-ember/10 px-3 py-2 text-ember">

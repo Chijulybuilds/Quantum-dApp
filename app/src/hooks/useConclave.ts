@@ -39,6 +39,23 @@ export function useConclaveAddress(): Address | undefined {
 }
 
 /**
+ * Whether `address` is an account QoreX can sign Conclave messages with: from QoreX itself for the
+ * connected account, otherwise from the key type the chain recorded (via the relayer API).
+ */
+export function useAccountKind(address?: Address): "cosmos" | "ethereum" | "unknown" | undefined {
+  const qorex = useQorexIdentity();
+  const own = qorex && address && qorex.address.toLowerCase() === address.toLowerCase() ? qorex.kind : undefined;
+  const info = useQuery({
+    queryKey: ["accountKind", address],
+    queryFn: () => api.keyInfo(address!),
+    enabled: Boolean(address) && !own,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  return own ?? info.data?.accountType;
+}
+
+/**
  * The connected wallet's "passport": its ML-DSA-87 key from the chain's registry (read with wagmi
  * from the pqcKeyStatus precompile) and its role in Conclave.
  */
@@ -67,6 +84,7 @@ export function usePassport() {
     query: { enabled: Boolean(address && conclave), refetchInterval: 20_000 },
   });
 
+  const accountKind = useAccountKind(address);
   const [registered, algorithmId, pubkey] = (key.data ?? [false, 0, "0x"]) as readonly [boolean, number, Hex];
   const keyBytes = pubkey ? (pubkey.length - 2) / 2 : 0;
   return {
@@ -82,6 +100,8 @@ export function usePassport() {
       mlDsa87: registered && algorithmId === 1 && keyBytes === 2592,
     },
     isMember: Boolean(member.data),
+    /** "ethereum": QoreX cannot sign Conclave messages with this account. */
+    accountKind,
     isGuardian: Boolean(address && dao.data && dao.data.guardian.toLowerCase() === address.toLowerCase()),
   };
 }

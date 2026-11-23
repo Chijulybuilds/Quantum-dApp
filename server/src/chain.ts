@@ -69,6 +69,24 @@ export async function nativeAccount(address: string) {
   return { accountNumber: BigInt(acc.account_number ?? "0"), sequence: BigInt(acc.sequence ?? "0") };
 }
 
+/**
+ * Which kind of key an account signs with, from the public key the chain recorded at its first
+ * transaction. "cosmos": a QoreX-created account (address = RIPEMD160(SHA256(key))). "ethereum":
+ * an Ethereum-type account (address = Keccak(key)), e.g. imported from MetaMask. QoreX cannot sign
+ * Conclave messages with Ethereum-type accounts, so they cannot vote from QoreX.
+ */
+export type AccountKind = "cosmos" | "ethereum" | "unknown";
+export async function accountKind(cosmosAddress: string): Promise<AccountKind> {
+  const res = await fetch(`${config.rest}/cosmos/auth/v1beta1/accounts/${cosmosAddress}`);
+  if (!res.ok) return "unknown";
+  const body = (await res.json()) as { account?: Record<string, unknown> };
+  const acc = (body.account?.base_account ?? body.account ?? {}) as { pub_key?: { "@type"?: string } };
+  const type = acc.pub_key?.["@type"] ?? "";
+  if (/ethsecp256k1/i.test(type)) return "ethereum";
+  if (/secp256k1/i.test(type)) return "cosmos";
+  return "unknown";
+}
+
 export async function balanceUqor(address: string): Promise<bigint> {
   const res = await fetch(`${config.rest}/cosmos/bank/v1beta1/balances/${address}`);
   if (!res.ok) throw new Error(`balance query failed: HTTP ${res.status}`);

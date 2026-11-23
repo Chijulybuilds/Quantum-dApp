@@ -13,7 +13,9 @@ import { secureHeaders } from "hono/secure-headers";
 import { getAddress, isAddress, parseEther, type Address, type Hex } from "viem";
 import { z } from "zod";
 
-import { account, balanceUqor, keyStatus } from "./chain.js";
+import { toQorAddress } from "@qorechain/evm";
+
+import { account, accountKind, balanceUqor, keyStatus } from "./chain.js";
 import { HttpError, config, deployment } from "./config.js";
 import { getDao, getProposal, listProposals, read, recentActivity } from "./indexer.js";
 import { isScopedTo, relayerWindow } from "./keeper.js";
@@ -147,8 +149,15 @@ export function createApp() {
   app.get("/api/keys/:address", async (c) => {
     const a = c.req.param("address");
     if (!isAddress(a, { strict: false })) throw new HttpError(400, "BadAddress", "Invalid address");
-    const s = await keyStatus(getAddress(a));
-    return json(c, { address: getAddress(a), registered: s.registered, algorithmId: s.algorithmId, mlDsa87: s.isMlDsa87, keyBytes: (s.pubkey.length - 2) / 2 });
+    const [s, kind] = await Promise.all([keyStatus(getAddress(a)), accountKind(toQorAddress(getAddress(a))).catch(() => "unknown" as const)]);
+    return json(c, {
+      address: getAddress(a),
+      registered: s.registered,
+      algorithmId: s.algorithmId,
+      mlDsa87: s.isMlDsa87,
+      keyBytes: (s.pubkey.length - 2) / 2,
+      accountType: kind,
+    });
   });
   app.get("/api/relayer", async (c) => {
     const relayer = await account("relayer");

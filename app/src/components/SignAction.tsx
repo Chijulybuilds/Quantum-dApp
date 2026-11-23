@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { Address, Hex } from "viem";
 
+import { useAccountKind } from "../hooks/useConclave";
 import type { RelayResult } from "../lib/api";
 import { txUrl } from "../lib/config";
 import { canSignWithQorex, isExtensionReloaded, parseSignature, qorexInstalled, signWithQorex } from "../lib/qorex";
@@ -45,6 +46,7 @@ export function SignAction({
     }
   };
   const qorexReady = canSignWithQorex();
+  const ethereumAccount = useAccountKind(signer) === "ethereum";
 
   const run = async (getSignature: () => Promise<Hex>) => {
     setError(undefined);
@@ -93,9 +95,10 @@ export function SignAction({
           </motion.div>
         ) : (
           <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+            {ethereumAccount && <EthereumAccountNotice />}
             <button
               type="button"
-              disabled={!message || !signer || !qorexReady}
+              disabled={!message || !signer || !qorexReady || ethereumAccount}
               onClick={() => run(() => signWithQorex(message!, signer!))}
               className="btn btn-violet w-full"
             >
@@ -176,5 +179,25 @@ export function SealedCheck() {
         <motion.path d="M5 12.5l4.5 4.5L19 7.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.5, delay: 0.1 }} />
       </svg>
     </span>
+  );
+}
+
+/** Shown instead of a doomed QoreX request when the account came from an Ethereum wallet. */
+export function EthereumAccountNotice({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="rounded-2xl border border-sun/40 bg-sun/10 p-4 text-sm text-sun">
+      <p className="font-medium">QoreX can't sign Conclave messages with this account.</p>
+      <p className="mt-1 text-sun/85">
+        It was imported from an Ethereum wallet (such as MetaMask). QoreX signs post-quantum messages only with accounts created
+        in QoreX.
+      </p>
+      {!compact && (
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sun/85">
+          <li>In QoreX, add a new account (create, don't import).</li>
+          <li>Send it a little test QOR, then send a tiny amount from it to itself: QoreX registers its ML-DSA-87 key.</li>
+          <li>Have a member propose it under New proposal → Add member (or replace this account with it).</li>
+        </ol>
+      )}
+    </div>
   );
 }
