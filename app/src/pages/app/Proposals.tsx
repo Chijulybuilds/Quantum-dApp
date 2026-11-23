@@ -1,16 +1,17 @@
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { decodeFunctionData, formatEther, getAddress, isAddress, keccak256, parseEther, toBytes, type Address } from "viem";
+import { toEvmAddress } from "@qorechain/evm/window";
+import { decodeFunctionData, encodeFunctionData, formatEther, getAddress, isAddress, keccak256, parseEther, toBytes, type Address, type Hex } from "viem";
 import { useReadContract, useWriteContract } from "wagmi";
 
 import { rise, trackPointer } from "../../components/live/motion";
 import { SealConnect } from "../../components/SealConnect";
 import { SealedCheck, SignAction } from "../../components/SignAction";
-import { useConclaveAddress, useDao, useHealth, usePassport, useProposals, useRefreshAll } from "../../hooks/useConclave";
+import { useConclaveAddress, useDao, useHealth, usePassport, useProposals, useRefreshAll, useRelayer } from "../../hooks/useConclave";
 import { useNow } from "../../hooks/useNow";
 import { conclaveAbi, proxyAdminAbi } from "../../lib/abi";
 import { api, type Proposal } from "../../lib/api";
-import { txUrl } from "../../lib/config";
+import { PQC_KEY_STATUS, qorePqcAbi, txUrl } from "../../lib/config";
 import { duration, nowSeconds, short } from "../../lib/format";
 import { stateClass } from "../../lib/ui";
 
@@ -218,6 +219,11 @@ function decodeActions(p: Proposal, conclave?: Address, proxyAdmin?: Address): D
           const [token, to, amount] = d.args as [Address, Address, bigint];
           return { label: "Pay token", detail: `${formatEther(amount)} of ${short(token)} → ${short(to)}` };
         }
+        if (d.functionName === "addMember") return { label: "Add member", detail: short(d.args[0] as Address, 8, 6) };
+        if (d.functionName === "removeMember") return { label: "Remove member", detail: short(d.args[0] as Address, 8, 6) };
+        if (d.functionName === "setThreshold") return { label: "Votes needed", detail: `→ ${String(d.args[0])}` };
+        if (d.functionName === "setGuardian") return { label: "Set guardian", detail: short(d.args[0] as Address, 8, 6) };
+        if (d.functionName === "unpause") return { label: "Unpause", detail: "resume payouts" };
         return { label: d.functionName, detail: (d.args ?? []).map(String).join(", ") || "governance" };
       } catch {
         /* fall through */
@@ -496,38 +502,119 @@ function DemoVotes({ id, onDone }: { id: string; onDone: () => void }) {
   );
 }
 
+type Kind = "payout" | "add" | "remove";
+interface Actions {
+  targets: Address[];
+  values: string[];
+  calldatas: Hex[];
+  description: string;
+}
+
+const KINDS: { id: Kind; label: string }[] = [
+  { id: "payout", label: "Payout" },
+  { id: "add", label: "Add member" },
+  { id: "remove", label: "Remove member" },
+];
+
+/** The smallest strict majority of `count` members. */
+const majority = (count: number) => Math.floor(count / 2) + 1;
+/** Votes needed once the member count changes: the current number if it is still a strict majority. */
+const thresholdFor = (current: number, count: number) => (current >= 1 && current <= count && current * 2 > count ? current : majority(count));
+
+/** A 0x… or qor1… account as a checksummed 0x address. */
+function parseAccount(raw: string): Address | undefined {
+  const s = raw.trim();
+  try {
+    if (/^qor1[02-9ac-hj-np-z]{38}$/.test(s)) return getAddress(toEvmAddress(s));
+    if (isAddress(s, { strict: false })) return getAddress(s);
+  } catch {
+    /* not an address */
+  }
+  return undefined;
+}
+
+const same = (a?: string, b?: string) => Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+
 export function ComposeDrawer({ onClose }: { onClose: () => void }) {
   const passport = usePassport();
   const health = useHealth();
+  const dao = useDao();
+  const relayer = useRelayer();
+  const conclave = useConclaveAddress();
   const refresh = useRefreshAll();
+  const [kind, setKind] = useState<Kind>("payout");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("0.1");
+  const [account, setAccount] = useState("");
+  const [removing, setRemoving] = useState<Address>();
   const [description, setDescription] = useState("");
-  const [draft, setDraft] = useState<{ message: string; deadline: string; to: Address; value: string }>();
+  const [draft, setDraft] = useState<{ message: string; deadline: string; actions: Actions }>();
   const [error, setError] = useState<string>();
   const [created, setCreated] = useState<string>();
 
-  const valid = useMemo(
-    () => isAddress(to, { strict: false }) && /^\d+(\.\d{1,18})?$/.test(amount) && Number(amount) > 0 && description.trim().length > 2,
-    [to, amount, description],
-  );
+  // Any change to the proposal invalidates a prepared message.
+  useEffect(() => {
+    setDraft(undefined);
+    setError(undefined);
+  }, [kind, to, amount, account, removing, description]);
+
+  const members = dao.data?.members ?? [];
+  const current = dao.data?.threshold ?? 0;
+  const candidate = kind === "add" ? parseAccount(account) : undefined;
+  const key = useReadContract({
+    address: PQC_KEY_STATUS,
+    abi: qorePqcAbi,
+    functionName: "pqcKeyStatus",
+    args: candidate ? [candidate] : undefined,
+    query: { enabled: Boolean(candidate) },
+  });
+  const [registered, algorithmId, pubkey] = (key.data ?? [false, 0, "0x"]) as readonly [boolean, number, Hex];
+  const candidateHasKey = registered && algorithmId === 1 && (pubkey.length - 2) / 2 === 2592;
+  const candidateIsMember = members.some((m) => same(m.address, candidate));
+  const candidateIsRelayer = same(candidate, relayer.data?.address);
+
+  /** The actions this proposal will run, or why it cannot be proposed yet. */
+  const plan = useMemo((): { actions?: Actions; summary?: string } => {
+    if (kind === "payout") {
+      const recipient = parseAccount(to);
+      const ok = recipient && /^\d+(\.\d{1,18})?$/.test(amount) && Number(amount) > 0 && description.trim().length > 2;
+      if (!ok) return {};
+      return {
+        actions: { targets: [recipient], values: [parseEther(amount).toString()], calldatas: ["0x"], description: description.trim() },
+      };
+    }
+    if (!conclave || !members.length) return {};
+    const count = kind === "add" ? members.length + 1 : members.length - 1;
+    const target = kind === "add" ? candidate : removing;
+    if (!target || count < 1) return {};
+    if (kind === "add" && (candidateIsMember || !candidateHasKey)) return {};
+    const next = thresholdFor(current, count);
+    const calldatas: Hex[] = [
+      kind === "add"
+        ? encodeFunctionData({ abi: conclaveAbi, functionName: "addMember", args: [target] })
+        : encodeFunctionData({ abi: conclaveAbi, functionName: "removeMember", args: [target] }),
+    ];
+    // Conclave checks after all actions that the threshold is a strict majority, so change it in the same proposal.
+    if (next !== current) calldatas.push(encodeFunctionData({ abi: conclaveAbi, functionName: "setThreshold", args: [next] }));
+    const summary = `${next} of ${count} votes to pass`;
+    return {
+      summary,
+      actions: {
+        targets: calldatas.map(() => conclave),
+        values: calldatas.map(() => "0"),
+        calldatas,
+        description: description.trim() || `${kind === "add" ? "Add" : "Remove"} member ${target} (${summary})`,
+      },
+    };
+  }, [kind, to, amount, description, conclave, members, current, candidate, removing, candidateIsMember, candidateHasKey]);
 
   const prepare = async () => {
     setError(undefined);
-    if (!passport.address) return;
+    if (!passport.address || !plan.actions) return;
     try {
-      const recipient = getAddress(to) as Address;
-      const value = parseEther(amount).toString();
       const deadline = String(nowSeconds() + 3600);
-      const { message } = await api.proposeMessage({
-        proposer: passport.address,
-        targets: [recipient],
-        values: [value],
-        calldatas: ["0x"],
-        description: description.trim(),
-        deadline,
-      });
-      setDraft({ message, deadline, to: recipient, value });
+      const { message } = await api.proposeMessage({ proposer: passport.address, ...plan.actions, deadline });
+      setDraft({ message, deadline, actions: plan.actions });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -535,8 +622,10 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
 
   const demoPropose = async (member: "A" | "B") => {
     setError(undefined);
+    const recipient = parseAccount(to);
+    if (!recipient) return;
     try {
-      const r = await api.demoPropose({ member, to: getAddress(to) as Address, amount, description: description.trim() });
+      const r = await api.demoPropose({ member, to: recipient, amount, description: description.trim() });
       setCreated(r.proposalId);
       refresh();
     } catch (err) {
@@ -547,13 +636,9 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
   const field = "mt-2 w-full rounded-2xl border border-white/10 bg-ink px-4 py-3.5 text-sm outline-none transition-colors focus:border-violet";
 
   return (
-    <Drawer title="New payout proposal" onClose={onClose}>
+    <Drawer title="New proposal" onClose={onClose}>
       {created ? (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex items-center gap-4 rounded-2xl border border-mint/40 bg-mint/10 p-6"
-        >
+        <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="flex items-center gap-4 rounded-2xl border border-mint/40 bg-mint/10 p-6">
           <SealedCheck />
           <div>
             <p className="text-lg text-mint">Proposal #{created} created</p>
@@ -562,21 +647,108 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
         </motion.div>
       ) : (
         <div className="space-y-5">
+          <div className="relative grid grid-cols-3 rounded-full bg-white/5 p-1">
+            {KINDS.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                onClick={() => setKind(k.id)}
+                className={`relative rounded-full py-2.5 text-sm transition-colors duration-300 ${kind === k.id ? "text-ink" : "text-fog hover:text-white"}`}
+              >
+                {kind === k.id && <motion.span layoutId="compose-kind" className="absolute inset-0 rounded-full bg-white" transition={{ type: "spring", stiffness: 420, damping: 34 }} />}
+                <span className="relative">{k.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {kind === "payout" && (
+            <>
+              <label className="block">
+                <span className="text-sm text-fog">Recipient (0x… or qor1…)</span>
+                <input value={to} onChange={(e) => setTo(e.target.value.trim())} className={`hash ${field}`} placeholder="0x…" />
+              </label>
+              <label className="block">
+                <span className="text-sm text-fog">Amount (QOR)</span>
+                <input value={amount} onChange={(e) => setAmount(e.target.value.trim())} inputMode="decimal" className={field} />
+              </label>
+            </>
+          )}
+
+          {kind === "add" && (
+            <div>
+              <label className="block">
+                <span className="text-sm text-fog">New member (0x… or qor1…)</span>
+                <input value={account} onChange={(e) => setAccount(e.target.value.trim())} className={`hash ${field}`} placeholder="0x… or qor1…" />
+              </label>
+              <div className="mt-2 text-sm">
+                {!account ? (
+                  <p className="text-mute">They must already have an ML-DSA-87 key registered on QoreChain.</p>
+                ) : !candidate ? (
+                  <p className="text-ember">Not a valid 0x or qor1 address.</p>
+                ) : key.isLoading ? (
+                  <p className="text-fog">Checking their post-quantum key…</p>
+                ) : candidateIsMember ? (
+                  <p className="text-fog">Already a member.</p>
+                ) : !candidateHasKey ? (
+                  <p className="text-ember">
+                    No ML-DSA-87 key registered for this account yet. Its owner must register one first (QoreX does it), because a member who
+                    cannot sign could block every vote.
+                  </p>
+                ) : (
+                  <p className="text-mint">ML-DSA-87 key registered ✓</p>
+                )}
+                {candidateIsRelayer && (
+                  <p className="mt-2 rounded-xl border border-ember/40 bg-ember/10 px-3 py-2 text-ember">
+                    This is the relayer. Its keys live on the server with the two demo members', so the server alone would hold a majority. Not
+                    recommended.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {kind === "remove" && (
+            <div>
+              <p className="text-sm text-fog">Member to remove</p>
+              <div className="mt-2 space-y-2">
+                {members.map((m) => (
+                  <button
+                    key={m.address}
+                    type="button"
+                    onClick={() => setRemoving(m.address)}
+                    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition-colors ${
+                      same(removing, m.address) ? "border-ember/60 bg-ember/10" : "border-white/10 hover:border-white/25"
+                    }`}
+                  >
+                    <span className="hash">{short(m.address, 10, 8)}</span>
+                    {same(m.address, passport.address) && <span className="text-xs text-fog">you</span>}
+                  </button>
+                ))}
+              </div>
+              {members.length <= 1 && <p className="mt-2 text-sm text-ember">The last member cannot be removed.</p>}
+            </div>
+          )}
+
+          {plan.summary && (
+            <p className="rounded-2xl border border-white/10 px-4 py-3 text-sm text-fog">
+              After this: <span className="text-white">{plan.summary}</span>. Open proposals become Stale when membership changes.
+            </p>
+          )}
+
           <label className="block">
-            <span className="text-sm text-fog">Recipient (0x…)</span>
-            <input value={to} onChange={(e) => setTo(e.target.value.trim())} className={`hash ${field}`} placeholder="0x…" />
-          </label>
-          <label className="block">
-            <span className="text-sm text-fog">Amount (QOR)</span>
-            <input value={amount} onChange={(e) => setAmount(e.target.value.trim())} inputMode="decimal" className={field} />
-          </label>
-          <label className="block">
-            <span className="text-sm text-fog">What is it for?</span>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} maxLength={500} className={field} placeholder="Grant for …" />
+            <span className="text-sm text-fog">{kind === "payout" ? "What is it for?" : "Note (optional)"}</span>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              maxLength={500}
+              className={field}
+              placeholder={kind === "payout" ? "Grant for …" : "Why this change"}
+            />
           </label>
 
           {!draft && passport.isMember && passport.key.mlDsa87 && (
-            <button type="button" className="btn btn-violet w-full" disabled={!valid} onClick={prepare}>
+            <button type="button" className="btn btn-violet w-full" disabled={!plan.actions} onClick={prepare}>
               Prepare the message to sign
             </button>
           )}
@@ -587,18 +759,12 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
               message={draft.message}
               signer={passport.address}
               label="Propose"
-              cliCommand={`cd contracts && npm run conclave propose-payout ${draft.to} ${amount} "${description.trim()}"`}
-              submit={(signature) =>
-                api.relayPropose({
-                  proposer: passport.address!,
-                  targets: [draft.to],
-                  values: [draft.value],
-                  calldatas: ["0x"],
-                  description: description.trim(),
-                  deadline: draft.deadline,
-                  signature,
-                })
+              cliCommand={
+                kind === "payout"
+                  ? `cd contracts && npm run conclave propose-payout ${draft.actions.targets[0]} ${amount} "${draft.actions.description}"`
+                  : "Member changes are signed in QoreX (the CLI has no command for them)."
               }
+              submit={(signature) => api.relayPropose({ proposer: passport.address!, ...draft.actions, deadline: draft.deadline, signature })}
               onDone={(r) => {
                 setCreated(r.proposalId);
                 refresh();
@@ -606,14 +772,14 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
             />
           )}
 
-          {health.data?.demoMode && (
+          {health.data?.demoMode && kind === "payout" && (
             <div className="rounded-2xl border border-dashed border-white/15 p-5">
               <p className="text-sm text-fog">Testnet demo · let a demo member propose it</p>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <button type="button" className="btn btn-ghost text-sm" disabled={!valid} onClick={() => demoPropose("A")}>
+                <button type="button" className="btn btn-ghost text-sm" disabled={!plan.actions} onClick={() => demoPropose("A")}>
                   Demo A proposes
                 </button>
-                <button type="button" className="btn btn-ghost text-sm" disabled={!valid} onClick={() => demoPropose("B")}>
+                <button type="button" className="btn btn-ghost text-sm" disabled={!plan.actions} onClick={() => demoPropose("B")}>
                   Demo B proposes
                 </button>
               </div>

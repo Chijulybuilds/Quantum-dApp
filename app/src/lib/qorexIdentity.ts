@@ -12,6 +12,7 @@ import { useSyncExternalStore } from "react";
 import { getAddress, type Address } from "viem";
 
 import { appConfig } from "./config";
+import { EXTENSION_RELOADED_MESSAGE, isExtensionReloaded } from "./qorex";
 
 export interface QorexIdentity {
   /** 0x form of the qor1 account (same 20 bytes). */
@@ -47,6 +48,14 @@ function set(next: QorexIdentity | undefined) {
 
 /** Asks QoreX to connect this site on the native lane and reads the active account. */
 export async function connectQorexNative(): Promise<QorexIdentity> {
+  try {
+    return await connectInner();
+  } catch (err) {
+    throw isExtensionReloaded(err) ? new Error(EXTENSION_RELOADED_MESSAGE) : err;
+  }
+}
+
+async function connectInner(): Promise<QorexIdentity> {
   const native = getQorexNative();
   if (!native) throw new Error("QoreX is not installed in this browser.");
   try {

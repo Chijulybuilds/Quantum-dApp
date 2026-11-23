@@ -14,7 +14,7 @@ import { appConfig } from "./config";
 
 export const ML_DSA_87_SIGNATURE_BYTES = 4627;
 
-export type SignErrorCode = "NoQorex" | "Unsupported" | "WrongAccount" | "Rejected" | "BadSignature";
+export type SignErrorCode = "NoQorex" | "Unsupported" | "WrongAccount" | "Rejected" | "BadSignature" | "ExtensionReloaded";
 
 export class SignError extends Error {
   constructor(
@@ -68,7 +68,29 @@ export function parseSignature(input: string): Hex {
 }
 
 /** Asks QoreX to sign `message` with the ML-DSA-87 key of `expected` and returns the PQ signature. */
+/**
+ * Chrome's errors when QoreX was reloaded, updated or restarted while this page stayed open: the
+ * script QoreX injected into the page can no longer reach the extension until the page reloads.
+ */
+const EXTENSION_GONE = /extension context invalidated|receiving end does not exist|message port closed|disconnected port/i;
+
+export function isExtensionReloaded(err: unknown): boolean {
+  return err instanceof SignError ? err.code === "ExtensionReloaded" : EXTENSION_GONE.test(err instanceof Error ? err.message : String(err));
+}
+
+export const EXTENSION_RELOADED_MESSAGE =
+  "QoreX was restarted or updated while this page was open, so the page lost its connection to it. Nothing was signed or sent. Refresh the page and try again.";
+
 export async function signWithQorex(message: string, expected: Address): Promise<Hex> {
+  try {
+    return await signWithQorexInner(message, expected);
+  } catch (err) {
+    if (isExtensionReloaded(err)) throw new SignError("ExtensionReloaded", EXTENSION_RELOADED_MESSAGE);
+    throw err;
+  }
+}
+
+async function signWithQorexInner(message: string, expected: Address): Promise<Hex> {
   const native = getQorexNative() as SigningProvider | undefined;
   if (!native) throw new SignError("NoQorex", "QoreX is not installed in this browser");
   if (!native.capabilities?.includes("signArbitrary")) {

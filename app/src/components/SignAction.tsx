@@ -4,7 +4,7 @@ import type { Address, Hex } from "viem";
 
 import type { RelayResult } from "../lib/api";
 import { txUrl } from "../lib/config";
-import { canSignWithQorex, parseSignature, qorexInstalled, signWithQorex } from "../lib/qorex";
+import { canSignWithQorex, isExtensionReloaded, parseSignature, qorexInstalled, signWithQorex } from "../lib/qorex";
 import { SignatureForge } from "./live/SignatureForge";
 
 type Phase = "idle" | "signing" | "relaying" | "done" | "error";
@@ -30,6 +30,7 @@ export function SignAction({
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string>();
+  const [needsReload, setNeedsReload] = useState(false);
   const [result, setResult] = useState<RelayResult>();
   const [manual, setManual] = useState(false);
   const [pasted, setPasted] = useState("");
@@ -49,6 +50,7 @@ export function SignAction({
       onDone?.(r);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setNeedsReload(isExtensionReloaded(err));
       setPhase("error");
     }
   };
@@ -113,7 +115,16 @@ export function SignAction({
                 </motion.div>
               )}
             </AnimatePresence>
-            {error && <p className="rounded-xl border border-ember/40 bg-ember/10 px-3 py-2 text-sm text-ember">{error}</p>}
+            {error && (
+              <div className="rounded-xl border border-ember/40 bg-ember/10 px-3 py-2 text-sm text-ember">
+                <p>{error}</p>
+                {needsReload && (
+                  <button type="button" onClick={() => window.location.reload()} className="btn btn-ghost mt-3 h-9 px-4 text-sm text-white">
+                    Refresh the page
+                  </button>
+                )}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
