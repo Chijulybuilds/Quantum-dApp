@@ -92,7 +92,7 @@ export function isExtensionReloaded(err: unknown): boolean {
 const REQUEST_DROPPED = /message channel closed|asynchronous response by returning true/i;
 
 export const REQUEST_DROPPED_MESSAGE =
-  "QoreX dropped the request before answering, which happens when QoreX is locked and asks for your password while the page waits. Nothing was signed. Unlock QoreX first (click its icon in the toolbar), then try again.";
+  "QoreX dropped the request before answering. Nothing was signed. Unlock QoreX first (click its icon in the toolbar) and try again; if it keeps happening, use “Sign with the Conclave CLI instead”.";
 
 /** A friendly error for QoreX's extension lifecycle problems, or undefined for anything else. */
 export function explainQorexError(err: unknown): SignError | undefined {
@@ -114,21 +114,46 @@ export async function signWithQorex(message: string, expected: Address): Promise
   }
 }
 
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One QoreX request, retried once if QoreX dropped it (its background worker often survives the
+ * second try, e.g. after the first one woke it or the user unlocked it). Says which step failed.
+ */
+async function qorexStep<T>(step: string, run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      const known = explainQorexError(err);
+      if (known?.code === "RequestDropped" && attempt === 1) {
+        await pause(500);
+        continue;
+      }
+      if (known) throw new SignError(known.code, `${known.message} (QoreX stopped while ${step}.)`);
+      throw err;
+    }
+  }
+}
+
 async function signWithQorexInner(message: string, expected: Address): Promise<Hex> {
   const native = getQorexNative() as SigningProvider | undefined;
   if (!native) throw new SignError("NoQorex", "QoreX is not installed in this browser");
   if (!native.capabilities?.includes("signArbitrary")) {
     throw new SignError("Unsupported", "This QoreX version cannot sign messages yet: update QoreX, or use the Conclave CLI");
   }
-  await native.enable(appConfig.nativeChainId);
-  const key = await native.getKey(appConfig.nativeChainId);
+  await qorexStep("connecting", () => native.enable(appConfig.nativeChainId));
+  const key = await qorexStep("reading the account", () => native.getKey(appConfig.nativeChainId));
   if (getAddress(toEvmAddress(key.bech32Address)) !== getAddress(expected)) {
     throw new SignError("WrongAccount", `QoreX is on ${key.bech32Address}; switch to the account ${expected}`);
   }
   let result: MessageSignature;
   try {
-    result = (await native.signArbitrary(appConfig.nativeChainId, key.bech32Address, message)) as MessageSignature;
+    result = (await qorexStep("signing the message", () =>
+      native.signArbitrary(appConfig.nativeChainId, key.bech32Address, message),
+    )) as MessageSignature;
   } catch (err) {
+    if (err instanceof SignError) throw err;
     throw new SignError("Rejected", err instanceof Error ? err.message : "Signing was rejected");
   }
   if (!result?.pq?.signature) throw new SignError("BadSignature", "QoreX returned no ML-DSA-87 signature");

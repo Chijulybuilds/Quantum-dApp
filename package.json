@@ -17,6 +17,7 @@
     "redeploy:testnet": "npm --prefix server run redeploy:testnet",
     "prereplace-member": "node scripts/check-install.mjs",
     "replace-member": "npm --prefix server run replace-member --",
+    "sign-message": "npm --prefix contracts run sign-message --",
     "predev": "node scripts/check-install.mjs",
     "dev": "concurrently --kill-others-on-fail -n relayer,app -c magenta,cyan \"npm --prefix server run dev\" \"npm --prefix app run dev\"",
     "predev:app": "node scripts/check-install.mjs",

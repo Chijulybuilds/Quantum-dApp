@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { Address, Hex } from "viem";
 
+import { useAccountKind } from "../hooks/useConclave";
 import type { RelayResult } from "../lib/api";
 import { txUrl } from "../lib/config";
 import { canSignWithQorex, isExtensionReloaded, parseSignature, qorexInstalled, signWithQorex } from "../lib/qorex";
@@ -17,14 +18,12 @@ export function SignAction({
   message,
   signer,
   label,
-  cliCommand,
   submit,
   onDone,
 }: {
   message?: string;
   signer?: Address;
   label: string;
-  cliCommand: string;
   submit: (signature: Hex) => Promise<RelayResult>;
   onDone?: (r: RelayResult) => void;
 }) {
@@ -35,7 +34,19 @@ export function SignAction({
   const [manual, setManual] = useState(false);
   const [pasted, setPasted] = useState("");
   const [signature, setSignature] = useState<Hex>();
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (!message) return;
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard blocked: the text can still be selected by hand */
+    }
+  };
   const qorexReady = canSignWithQorex();
+  const ethereumAccount = useAccountKind(signer) === "ethereum";
 
   const run = async (getSignature: () => Promise<Hex>) => {
     setError(undefined);
@@ -58,9 +69,11 @@ export function SignAction({
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/10 bg-ink p-4">
-        <div className="mb-3 flex items-center justify-between text-xs text-fog">
+        <div className="mb-3 flex items-center justify-between gap-3 text-xs text-fog">
           <span>You sign exactly this · ML-DSA-87</span>
-          <span className="hash">qorechain-msg-v1</span>
+          <button type="button" onClick={copy} disabled={!message} className="rounded-full border border-white/10 px-2.5 py-1 transition-colors hover:text-white">
+            {copied ? "Copied ✓" : "Copy message"}
+          </button>
         </div>
         <pre className="hash max-h-56 overflow-auto text-[0.8rem] leading-6 whitespace-pre-wrap text-white/85">{message ?? "Loading the message from the contract…"}</pre>
       </div>
@@ -82,9 +95,10 @@ export function SignAction({
           </motion.div>
         ) : (
           <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+            {ethereumAccount && <EthereumAccountNotice />}
             <button
               type="button"
-              disabled={!message || !signer || !qorexReady}
+              disabled={!message || !signer || !qorexReady || ethereumAccount}
               onClick={() => run(() => signWithQorex(message!, signer!))}
               className="btn btn-violet w-full"
             >
@@ -101,7 +115,20 @@ export function SignAction({
             <AnimatePresence>
               {manual && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="space-y-2 overflow-hidden">
-                  <pre className="hash overflow-x-auto rounded-xl bg-white/5 p-3 text-[0.72rem] text-white/80">{cliCommand}</pre>
+                  <ol className="list-decimal space-y-1 pl-5 text-xs text-fog">
+                    <li>
+                      <button type="button" onClick={copy} className="text-white underline-offset-4 hover:underline">
+                        {copied ? "Copied ✓" : "Copy the message"}
+                      </button>{" "}
+                      above.
+                    </li>
+                    <li>
+                      In the repo, with this member's recovery phrase as <span className="hash">MEMBER_MNEMONIC</span> in{" "}
+                      <span className="hash">contracts/.env</span>, run the command below, paste the message, then press Enter and Ctrl+D.
+                    </li>
+                    <li>Paste the signature it prints here. The relayer checks it against your registered key before sending.</li>
+                  </ol>
+                  <pre className="hash overflow-x-auto rounded-xl bg-white/5 p-3 text-[0.72rem] text-white/80">npm run sign-message</pre>
                   <textarea
                     value={pasted}
                     onChange={(e) => setPasted(e.target.value)}
@@ -152,5 +179,25 @@ export function SealedCheck() {
         <motion.path d="M5 12.5l4.5 4.5L19 7.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.5, delay: 0.1 }} />
       </svg>
     </span>
+  );
+}
+
+/** Shown instead of a doomed QoreX request when the account came from an Ethereum wallet. */
+export function EthereumAccountNotice({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="rounded-2xl border border-sun/40 bg-sun/10 p-4 text-sm text-sun">
+      <p className="font-medium">QoreX can't sign Conclave messages with this account.</p>
+      <p className="mt-1 text-sun/85">
+        It was imported from an Ethereum wallet (such as MetaMask). QoreX signs post-quantum messages only with accounts created
+        in QoreX.
+      </p>
+      {!compact && (
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sun/85">
+          <li>In QoreX, add a new account (create, don't import).</li>
+          <li>Send it a little test QOR, then send a tiny amount from it to itself: QoreX registers its ML-DSA-87 key.</li>
+          <li>Have a member propose it under New proposal → Add member (or replace this account with it).</li>
+        </ol>
+      )}
+    </div>
   );
 }
