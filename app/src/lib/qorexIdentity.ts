@@ -12,7 +12,7 @@ import { useSyncExternalStore } from "react";
 import { getAddress, type Address } from "viem";
 
 import { appConfig } from "./config";
-import { EXTENSION_RELOADED_MESSAGE, isExtensionReloaded } from "./qorex";
+import { explainQorexError } from "./qorex";
 
 export interface QorexIdentity {
   /** 0x form of the qor1 account (same 20 bytes). */
@@ -51,7 +51,7 @@ export async function connectQorexNative(): Promise<QorexIdentity> {
   try {
     return await connectInner();
   } catch (err) {
-    throw isExtensionReloaded(err) ? new Error(EXTENSION_RELOADED_MESSAGE) : err;
+    throw explainQorexError(err) ?? err;
   }
 }
 

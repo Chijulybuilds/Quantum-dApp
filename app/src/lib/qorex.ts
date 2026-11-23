@@ -14,7 +14,14 @@ import { appConfig } from "./config";
 
 export const ML_DSA_87_SIGNATURE_BYTES = 4627;
 
-export type SignErrorCode = "NoQorex" | "Unsupported" | "WrongAccount" | "Rejected" | "BadSignature" | "ExtensionReloaded";
+export type SignErrorCode =
+  | "NoQorex"
+  | "Unsupported"
+  | "WrongAccount"
+  | "Rejected"
+  | "BadSignature"
+  | "ExtensionReloaded"
+  | "RequestDropped";
 
 export class SignError extends Error {
   constructor(
@@ -78,6 +85,24 @@ export function isExtensionReloaded(err: unknown): boolean {
   return err instanceof SignError ? err.code === "ExtensionReloaded" : EXTENSION_GONE.test(err instanceof Error ? err.message : String(err));
 }
 
+/**
+ * Chrome's error when QoreX's background worker stopped before answering a request: usually QoreX
+ * was locked, asked for the password, and Chrome shut the idle worker down meanwhile.
+ */
+const REQUEST_DROPPED = /message channel closed|asynchronous response by returning true/i;
+
+export const REQUEST_DROPPED_MESSAGE =
+  "QoreX dropped the request before answering, which happens when QoreX is locked and asks for your password while the page waits. Nothing was signed. Unlock QoreX first (click its icon in the toolbar), then try again.";
+
+/** A friendly error for QoreX's extension lifecycle problems, or undefined for anything else. */
+export function explainQorexError(err: unknown): SignError | undefined {
+  if (err instanceof SignError && (err.code === "ExtensionReloaded" || err.code === "RequestDropped")) return err;
+  const text = err instanceof Error ? err.message : String(err);
+  if (REQUEST_DROPPED.test(text)) return new SignError("RequestDropped", REQUEST_DROPPED_MESSAGE);
+  if (EXTENSION_GONE.test(text)) return new SignError("ExtensionReloaded", EXTENSION_RELOADED_MESSAGE);
+  return undefined;
+}
+
 export const EXTENSION_RELOADED_MESSAGE =
   "QoreX was restarted or updated while this page was open, so the page lost its connection to it. Nothing was signed or sent. Refresh the page and try again.";
 
@@ -85,8 +110,7 @@ export async function signWithQorex(message: string, expected: Address): Promise
   try {
     return await signWithQorexInner(message, expected);
   } catch (err) {
-    if (isExtensionReloaded(err)) throw new SignError("ExtensionReloaded", EXTENSION_RELOADED_MESSAGE);
-    throw err;
+    throw explainQorexError(err) ?? err;
   }
 }
 
