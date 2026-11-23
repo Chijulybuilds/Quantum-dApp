@@ -185,6 +185,19 @@ public HTTPS address, so test the mobile wallet on the published app.
 initializer's key checks would fail in simulation. `server/src/setup.ts` and
 `contracts/scripts/deploy.ts` send the deployment straight to the chain instead.
 
+### Replacing a lost member
+
+If a member loses their account, the others vote it out and a new one in, like any proposal. On
+the testnet DAO the two demo members hold a majority, so one command does it from the relayer
+machine (the new account needs a registered ML-DSA-87 key):
+
+```bash
+npm run replace-member -- <new 0x|qor1> [old 0x|qor1] --dry-run   # check first
+npm run replace-member -- <new 0x|qor1> [old 0x|qor1]             # propose, vote, wait, execute
+```
+
+`old` defaults to `CONCLAVE_FOUNDER`. The DAO keeps its address, treasury and history.
+
 ## Upgrading
 
 Conclave is deployed as an implementation behind `ConclaveProxy` (an unmodified OpenZeppelin 5.7
