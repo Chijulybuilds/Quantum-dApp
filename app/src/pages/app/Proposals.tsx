@@ -428,7 +428,6 @@ export function ProposalDrawer({ id, onClose }: { id: string; onClose: () => voi
                 message={voteMessage.data}
                 signer={passport.address}
                 label={support ? "Vote FOR" : "Vote AGAINST"}
-                cliCommand={`cd contracts && npm run conclave sign-vote ${p.id} ${support ? "for" : "against"}`}
                 submit={(signature) => api.relayVote({ proposalId: p.id, voter: passport.address!, support, signature })}
                 onDone={() => setTimeout(refresh, 600)}
               />
@@ -459,7 +458,6 @@ export function ProposalDrawer({ id, onClose }: { id: string; onClose: () => voi
             message={cancelMessage.data}
             signer={passport.address}
             label="Cancel proposal"
-            cliCommand={`cd contracts && npm run conclave cancel ${p.id}`}
             submit={(signature) => api.relayCancel({ proposalId: p.id, signature })}
             onDone={() => setTimeout(refresh, 600)}
           />
@@ -759,11 +757,6 @@ export function ComposeDrawer({ onClose }: { onClose: () => void }) {
               message={draft.message}
               signer={passport.address}
               label="Propose"
-              cliCommand={
-                kind === "payout"
-                  ? `cd contracts && npm run conclave propose-payout ${draft.actions.targets[0]} ${amount} "${draft.actions.description}"`
-                  : "Member changes are signed in QoreX (the CLI has no command for them)."
-              }
               submit={(signature) => api.relayPropose({ proposer: passport.address!, ...draft.actions, deadline: draft.deadline, signature })}
               onDone={(r) => {
                 setCreated(r.proposalId);

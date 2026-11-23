@@ -15,6 +15,7 @@
     "window": "tsx --env-file=.env scripts/window.ts",
     "deploy:testnet": "tsx --env-file=.env scripts/deploy.ts",
     "conclave": "tsx --env-file=.env scripts/conclave.ts",
+    "sign-message": "tsx --env-file=.env scripts/sign-message.ts",
     "pqc:check": "tsx --env-file=.env scripts/pqc-check.ts",
     "export-abi": "tsx scripts/export-abi.ts",
     "typecheck": "tsc --noEmit"
