@@ -8,18 +8,46 @@
  * `old` defaults to CONCLAVE_FOUNDER. One proposal runs addMember(new) and removeMember(old), plus
  * setThreshold if the vote count had to change (it does not when one member replaces another).
  * Every step is an ordinary ML-DSA-87 signed action: propose, two votes, the timelock, execute.
+ * Safe to re-run: it resumes an open proposal for the same change instead of creating another.
  */
 import { toEvmAddress } from "@qorechain/evm";
-import { encodeFunctionData, getAddress, isAddress, type Address, type Hex } from "viem";
+import { encodeFunctionData, getAddress, isAddress, keccak256, toBytes, type Address, type Hex } from "viem";
 
 import { conclaveAbi } from "./abi.js";
 import { account, keyStatus, txUrl } from "./chain.js";
 import { config, requireDeployment } from "./config.js";
 import { STATES, read } from "./indexer.js";
+import { ensureScopedWindow } from "./keeper.js";
 import { proposeMessage, relayExecute, relayPropose, relayVote } from "./relay.js";
 import { signAs } from "./signatures.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The real reason behind Node's generic "fetch failed" (connection reset, timeout, DNS, ...). */
+function reason(err: unknown): string {
+  const parts: string[] = [];
+  for (let e: unknown = err, depth = 0; e && depth < 4; e = (e as { cause?: unknown }).cause, depth++) {
+    const x = e as { message?: string; code?: string; hostname?: string };
+    const text = [x.code, x.message?.split("\n")[0], x.hostname].filter(Boolean).join(" ");
+    if (text && !parts.includes(text)) parts.push(text);
+  }
+  return parts.join(" <- ") || String(err);
+}
+const isNetwork = (err: unknown) =>
+  /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|UND_ERR|socket|timeout|network/i.test(reason(err));
+
+/** Runs a read-or-idempotent step, retrying network failures with backoff. */
+async function step<T>(label: string, run: () => Promise<T>, retries = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      if (attempt > retries || !isNetwork(err)) throw new Error(`${label}: ${reason(err)}`);
+      console.log(`   network error (${reason(err)}), retrying ${attempt}/${retries}…`);
+      await sleep(3000 * attempt);
+    }
+  }
+}
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 function parseAccount(raw: string | undefined, label: string): Address {
@@ -70,34 +98,62 @@ async function main(): Promise<void> {
     return;
   }
 
-  // ---- 1. Demo A proposes ---------------------------------------------------------------------
-  const input = {
-    proposer: voting[0]!,
-    targets: [dao, dao],
-    values: [0n, 0n],
-    calldatas,
-    description,
-    deadline: BigInt(Math.floor(Date.now() / 1000) + 3600),
-  };
   const role = (who: Address) => (same(who, demoA.evm) ? "demoA" : "demoB") as "demoA" | "demoB";
-  const proposed = await relayPropose({ ...input, signature: (await signAs(role(input.proposer), await proposeMessage(input))).signature });
-  const id = BigInt(proposed.proposalId ?? "0");
-  if (!id) throw new Error(`Proposal not created: ${proposed.url}`);
-  console.log(`\n1. proposed #${id}  ${proposed.url}`);
+  const targets = [dao, dao];
+  const values = [0n, 0n];
 
-  // ---- 2. The demo members vote FOR ------------------------------------------------------------
+  // ---- 0. The relayer's EVM window (it expires after about a day; renewing it is idempotent) ----
+  const window = await step("renewing the relayer's EVM window", () => ensureScopedWindow(dao));
+  console.log(`\n0. relayer window ${window.opened ? `renewed  ${txUrl(window.opened)}` : "open"}`);
+
+  // ---- 1. Resume an open proposal for this exact change, or Demo A proposes it ------------------
+  const proposalHash = await step("hashing the proposal", () =>
+    read<Hex>("hashProposal", [targets, values, calldatas, keccak256(toBytes(description))]),
+  );
+  const count = await step("reading proposals", () => read<bigint>("proposalCount"));
+  let id = 0n;
+  for (let i = count; i > 0n && i > count - 20n; i--) {
+    const p = await step("reading proposals", () => read<{ proposalHash: Hex }>("getProposal", [i]));
+    const state = STATES[await step("reading proposals", () => read<number>("state", [i]))];
+    if (same(p.proposalHash, proposalHash) && ["Active", "Queued", "Ready"].includes(state)) {
+      id = i;
+      console.log(`1. resuming proposal #${id} (${state})`);
+      break;
+    }
+  }
+  if (!id) {
+    const input = { proposer: voting[0]!, targets, values, calldatas, description, deadline: BigInt(Math.floor(Date.now() / 1000) + 3600) };
+    const message = await step("building the proposal message", () => proposeMessage(input));
+    const { signature } = await signAs(role(input.proposer), message);
+    // Not retried: it sends a transaction. If it fails, simply run the command again: it resumes.
+    const proposed = await relayPropose({ ...input, signature }).catch((err) => {
+      throw new Error(`proposing: ${reason(err)}`);
+    });
+    id = BigInt(proposed.proposalId ?? "0");
+    if (!id) throw new Error(`Proposal not created: ${proposed.url}`);
+    console.log(`1. proposed #${id}  ${proposed.url}`);
+  }
+
+  // ---- 2. The demo members vote FOR (skipping votes already cast) ------------------------------
   for (const voter of voting.slice(0, threshold)) {
-    const message = await read<string>("voteMessage", [id, voter, true]);
+    if (STATES[await step("reading the proposal", () => read<number>("state", [id]))] !== "Active") break;
+    if (await step("reading votes", () => read<boolean>("hasVoted", [id, voter]))) {
+      console.log(`2. ${role(voter)} already voted`);
+      continue;
+    }
+    const message = await step("building the vote message", () => read<string>("voteMessage", [id, voter, true]));
     const { signature } = await signAs(role(voter), message);
-    const r = await relayVote({ proposalId: id, voter, support: true, signature });
+    const r = await relayVote({ proposalId: id, voter, support: true, signature }).catch((err) => {
+      throw new Error(`voting as ${role(voter)}: ${reason(err)} (run the command again to resume)`);
+    });
     console.log(`2. ${role(voter)} voted FOR  ${r.url}`);
   }
 
   // ---- 3. Timelock -----------------------------------------------------------------------------
-  const timelock = Number(await read<bigint>("timelockDelay"));
+  const timelock = Number(await step("reading the timelock", () => read<bigint>("timelockDelay")));
   process.stdout.write(`3. waiting out the ${timelock}s timelock`);
   for (let waited = 0; ; waited += 10) {
-    const state = STATES[await read<number>("state", [id])];
+    const state = STATES[await step("reading the proposal", () => read<number>("state", [id]))];
     if (state === "Ready") break;
     if (state !== "Queued" || waited > timelock + 300) throw new Error(`\nProposal #${id} is ${state}`);
     process.stdout.write(".");
@@ -105,7 +161,9 @@ async function main(): Promise<void> {
   }
 
   // ---- 4. Execute ------------------------------------------------------------------------------
-  const executed = await relayExecute(id);
+  const executed = await relayExecute(id).catch((err) => {
+    throw new Error(`executing: ${reason(err)} (run the command again to resume)`);
+  });
   console.log(`\n4. executed  ${txUrl(executed.hash)}`);
   const [after, needed] = await Promise.all([read<Address[]>("members"), read<number>("threshold")]);
   console.log(`\nMembers now (${needed} of ${after.length} to pass):\n  ${after.join("\n  ")}`);
@@ -115,6 +173,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : err);
+  console.error(`\n${err instanceof Error ? err.message : reason(err)}`);
+  if (isNetwork(err)) {
+    console.error("A network request to QoreChain failed. Nothing is lost: run the same command again and it picks up where it stopped.");
+    console.error("If it keeps failing on WSL or a VPN, try first:  export NODE_OPTIONS=--dns-result-order=ipv4first");
+  }
   process.exitCode = 1;
 });
